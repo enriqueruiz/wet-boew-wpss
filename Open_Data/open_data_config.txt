@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #***********************************************************************
 #
 # Name:   open_data_config.txt
@@ -78,3 +79,131 @@ tcid OD_3
 Open_Data_Check_Profile_eng None
 Open_Data_Check_Profile_fra Aucun
 
+=======
+#***********************************************************************
+#
+# Name:   open_data_config.txt
+#
+# $Revision: 6567 $
+# $URL: svn://10.36.20.226/trunk/Web_Checks/Open_Data/Tools/open_data_config.txt $
+# $Date: 2014-02-21 08:50:56 -0500 (Fri, 21 Feb 2014) $
+#
+# Description:
+#   This file contains the configuration parameters for the
+# Open Data check package. The parameters appear as name/value pairs
+# with the name at the beginning of the line.
+#
+# Comment (lines starting with #) and blank lines are ignored.
+#
+#***********************************************************************
+
+#
+#***********************************************************************
+#
+# Testcase/help URL file name
+#
+#***********************************************************************
+#
+Testcase_URL_Help_File conf/open_data_testcase_url.config
+
+#
+#***********************************************************************
+#
+# Test testcase profile
+#
+#***********************************************************************
+#
+#Open_Data_Check_Profile_eng Test
+#Open_Data_Check_Profile_fra Test
+
+#
+# Testcase id
+#
+#tcid TBS_P2_R2
+
+#
+#***********************************************************************
+#
+# PWGSC Open Data
+#    http://www.tbs-sct.gc.ca/pol/doc-eng.aspx?section=text&id=25875
+#
+#***********************************************************************
+#
+Open_Data_Check_Profile_eng PWGSC OD
+Open_Data_Check_Profile_fra DO TPSGC
+
+#
+# Testcase id
+# Open Data files
+#
+tcid OD_1
+tcid OD_2
+tcid OD_3
+tcid OD_CSV_1
+tcid OD_TXT_1
+tcid OD_ZIP_1
+
+#
+# Open Data API
+#
+tcid OD_API_1
+tcid OD_API_2
+tcid OD_API_3
+
+#
+# PWGSC Open Data
+#
+tcid TP_PW_OD_CSV_1
+tcid TP_PW_OD_ZIP_1
+
+#
+#***********************************************************************
+#
+# Open Data
+#    http://www.tbs-sct.gc.ca/pol/doc-eng.aspx?section=text&id=25875
+#
+#***********************************************************************
+#
+Open_Data_Check_Profile_eng TBS OD
+Open_Data_Check_Profile_fra DO SCT
+
+#
+# Testcase id
+# Open Data file
+#
+tcid OD_1
+tcid OD_2
+tcid OD_3
+tcid OD_CSV_1
+tcid OD_TXT_1
+tcid OD_ZIP_1
+
+#
+# Open Data API
+#
+tcid OD_API_1
+tcid OD_API_2
+tcid OD_API_3
+
+#
+#***********************************************************************
+#
+# Testcase specific data settings
+#
+#***********************************************************************
+#
+
+#testcase_data OD_1
+
+
+#
+#***********************************************************************
+#
+# Empty Open Data testcase Profile
+#
+#***********************************************************************
+#
+Open_Data_Check_Profile_eng None
+Open_Data_Check_Profile_fra Aucun
+
+>>>>>>> cd924f176ead1826c0dd8e811da53b9f1ee1e583
