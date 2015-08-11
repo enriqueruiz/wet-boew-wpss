@@ -388,9 +388,9 @@ return 1;
 #
 # Name:   open_data_testcases.pm
 #
-# $Revision: 6568 $
-# $URL: svn://10.36.20.226/trunk/Web_Checks/Open_Data/Tools/open_data_testcases.pm $
-# $Date: 2014-02-21 08:51:15 -0500 (Fri, 21 Feb 2014) $
+# $Revision: 7041 $
+# $URL: svn://10.36.21.45/trunk/Web_Checks/Open_Data/Tools/open_data_testcases.pm $
+# $Date: 2015-03-20 11:28:56 -0400 (Fri, 20 Mar 2015) $
 #
 # Description:
 #
@@ -505,6 +505,7 @@ my (%testcase_description_en) = (
 # PWGSC Open Data checkpoints
 #
 "TP_PW_OD_CSV_1",   "TP_PW_OD_CSV_1: CSV Header Row",
+"TP_PW_OD_XML_1",   "TP_PW_OD_XML_1: XML Dictionary",
 "TP_PW_OD_ZIP_1",   "TP_PW_OD_ZIP_1: ZIP Archive",
 );
 
@@ -530,6 +531,7 @@ my (%testcase_description_fr) = (
 # PWGSC Open Data checkpoints
 #
 "TP_PW_OD_CSV_1",   "TP_PW_OD_CSV_1: Lignes d'en-tête du CSV",
+"TP_PW_OD_XML_1",   "TP_PW_OD_XML_1: XML Dictionnaire",
 "TP_PW_OD_ZIP_1",   "TP_PW_OD_ZIP_1: Archive ZIP",
 );
 

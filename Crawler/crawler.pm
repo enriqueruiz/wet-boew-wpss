@@ -3417,9 +3417,9 @@ return 1;
 #
 # Name: crawler.pm
 #
-# $Revision: 6705 $
-# $URL: svn://10.36.20.226/trunk/Web_Checks/Crawler/Tools/crawler.pm $
-# $Date: 2014-07-22 12:16:37 -0400 (Tue, 22 Jul 2014) $
+# $Revision: 7019 $
+# $URL: svn://10.36.21.45/trunk/Web_Checks/Crawler/Tools/crawler.pm $
+# $Date: 2015-03-05 11:31:32 -0500 (Thu, 05 Mar 2015) $
 #
 # Description:
 #
@@ -3428,6 +3428,7 @@ return 1;
 #
 # Public functions:
 #     Crawler_Decode_Content
+#     Crawler_Uncompress_Content_File
 #     Crawler_Abort_Crawl
 #     Crawler_Abort_Crawl_Status
 #     Crawler_Config
@@ -3444,7 +3445,6 @@ return 1;
 #     Set_Crawler_HTTP_Response_Callback
 #     Set_Crawler_HTTP_401_Callback
 #     Set_Crawler_Login_Logout
-#     Set_Crawler_Set_Maximum_URLs_To_Return
 #     Set_Crawler_URL_Ignore_Patterns
 #
 # Terms and Conditions of Use
@@ -3482,6 +3482,7 @@ package crawler;
 use strict;
 use Sys::Hostname;
 use LWP::RobotUA;
+use LWP::UserAgent;
 use HTTP::Cookies;
 use URI::URL;
 use File::Basename;
@@ -3490,10 +3491,12 @@ use Encode;
 use URI::Escape;
 use Digest::MD5 qw(md5_hex);
 use HTML::Parser;
+use IO::Uncompress::Gunzip qw(gunzip $GunzipError) ;
 my $have_threads = eval 'use threads; 1';
 if ( $have_threads ) {
     $have_threads = eval 'use threads::shared; 1';
 }
+use File::Temp qw/ tempfile tempdir /;
 
 #***********************************************************************
 #
@@ -3506,6 +3509,7 @@ BEGIN {
 
     @ISA     = qw(Exporter);
     @EXPORT  = qw(Crawler_Decode_Content
+                  Crawler_Uncompress_Content_File
                   Crawler_Abort_Crawl
                   Crawler_Abort_Crawl_Status
                   Crawler_Config
@@ -3521,7 +3525,6 @@ BEGIN {
                   Set_Crawler_HTTP_Response_Callback
                   Set_Crawler_HTTP_401_Callback
                   Set_Crawler_Login_Logout
-                  Set_Crawler_Set_Maximum_URLs_To_Return
                   Crawler_Set_Proxy
                   Set_Crawler_URL_Ignore_Patterns);
     $VERSION = "1.0";
@@ -3542,7 +3545,7 @@ my ($login_form_name, $http_401_callback_function, %http_401_credentials);
 my ($login_domain_e, $login_domain_f, $accepted_content_encodings);
 my (%domain_prod_dev_map, %domain_dev_prod_map);
 my ($login_interstitial_count, $logout_interstitial_count, $user_agent_hostname);
-my ($charset);
+my ($charset, $lwp_user_agent, $content_length);
 
 #
 # Shared variables for use between treads
@@ -3554,12 +3557,13 @@ if ( $have_threads ) {
 
 my ($user_agent_name) = "Crawler";
 my ($user_agent_max_size) = 10000000;
-my ($default_max_urls_between_sleeps) = 2;
+my ($user_agent_content_file) = 0;
 my ($debug) = 0;
 my ($max_urls_to_return) = 0;
 my ($max_redirects) = 10;
 my ($max_401s) = 2;
 my ($respect_robots_txt) = 1;
+my ($max_crawl_depth) = 0;
 
 #***********************************************************************
 #
@@ -3651,37 +3655,16 @@ sub Crawler_Robots_Handling {
 sub Crawler_Get_User_Agent {
 
     #
-    # Do we have a  user agent ?
+    # Do we have a user agent ?
     #
     if ( ! defined($user_agent) ) {
-        $user_agent = Create_User_Agent($default_max_urls_between_sleeps);
+        Create_User_Agents();
     }
 
     #
     # Return user agent
     #
     return($user_agent);
-}
-
-#***********************************************************************
-#
-# Name: Set_Crawler_Set_Maximum_URLs_To_Return
-#
-# Parameters: max_urls - maximum number of URLs
-#
-# Description:
-#
-#   This function sets the maximum number of URLs to return
-# from the crawling process.
-#
-#***********************************************************************
-sub Set_Crawler_Set_Maximum_URLs_To_Return {
-    my ($max_urls) = @_;
-
-    #
-    # Copy value into global variable.
-    #
-    $max_urls_to_return = $max_urls;
 }
 
 #***********************************************************************
@@ -3716,6 +3699,9 @@ sub Crawler_Config {
         }
         elsif ( $key eq "user_agent_hostname" ) {
             $user_agent_hostname = $value;
+        }
+        elsif ( $key eq "content_file" ) {
+            $user_agent_content_file = $value;
         }
     }
 }
@@ -4147,6 +4133,9 @@ sub Crawler_Decode_Content {
     # Get content with no charset decoding.
     #
     print "Crawler_Decode_Content\n" if $debug;
+    if ( ! defined($resp) ) {
+        return("");
+    }
     $content = $resp->decoded_content(charset => 'none');
 
     #
@@ -4180,23 +4169,80 @@ sub Crawler_Decode_Content {
 
 #***********************************************************************
 #
-# Name: Create_User_Agent
+# Name: Crawler_Uncompress_Content_File
 #
-# Parameters: max_urls_between_sleeps
+# Parameters: resp - HTTP::Response object
 #
 # Description:
 #
-#   This function creates a user agent object to be used in http
-# requests.
+#   This function checks whether or not the HTTP reponse content is
+# compressed.  If it is, the content file is uncompressed.
 #
 #***********************************************************************
-sub Create_User_Agent {
-    my ($max_urls_between_sleeps) = @_;
+sub Crawler_Uncompress_Content_File {
+    my ($resp) = @_;
+
+    my ($filename, $new_filename, $header);
+
+    #
+    # Check for GZIP content encodeing in the header
+    #
+    print "Crawler_Uncompress_Content_File\n" if $debug;
+    if ( defined($resp) &&
+         defined($resp->header('Content-Encoding') &&
+         ($resp->header('Content-Encoding') =~ /gzip/i)) ) {
+        print "Content is compressed with gzip\n" if $debug;
+        
+        #
+        # Get content file name
+        #
+        $filename = $resp->header("WPSS-Content-File");
+        
+        #
+        # Get a new temporary file
+        #
+        (undef, $new_filename) = tempfile(OPEN => 0);
+        
+        #
+        # Uncompress the content
+        #
+        print "Uncompressed with gunzip, $filename => $new_filename\n" if $debug;
+        if ( gunzip($filename => $new_filename) ) {
+            print "Gunzip successful\n" if $debug;
+            $header = $resp->headers;
+            $header->header("WPSS-Content-File" => $new_filename);
+            unlink($filename);
+        }
+        else {
+            print "Error: Crawler_Uncompress_Content_File failed to gunzip $filename, error = $GunzipError\n";
+        }
+    }
+
+    #
+    # Return
+    #
+    return();
+}
+
+#***********************************************************************
+#
+# Name: Create_User_Agents
+#
+# Parameters: none
+#
+# Description:
+#
+#   This function creates user agent objects to be used in http
+# requests.  Two user agents are created, one LWP::UserAgent and
+# one LWP::RobotUA.
+#
+#***********************************************************************
+sub Create_User_Agents {
 
     #
     # Local variables
     #
-    my ( $ua, $cookie_jar, $host );
+    my ($cookie_jar, $host);
 
     #
     # Get hostname if we were not given one in the configuration options.
@@ -4211,24 +4257,24 @@ sub Create_User_Agent {
     #
     # Setup user agent to handle HTTP requests
     #
-    print "Create user agent $user_agent_name, delay = $max_urls_between_sleeps\n" if $debug;
-    $ua = LWP::RobotUA->new("$user_agent_name", "$user_agent_name\@$host");
-    $ua->ssl_opts(verify_hostname => 0);
-    $ua->timeout("60");
-    $ua->delay(1/(60 * $max_urls_between_sleeps));
+    print "Create LWP::RobotUA user agent $user_agent_name\n" if $debug;
+    $user_agent = LWP::RobotUA->new("$user_agent_name", "$user_agent_name\@$host");
+    $user_agent->ssl_opts(verify_hostname => 0);
+    $user_agent->timeout("60");
+    $user_agent->delay(1/120);
 
     #
     # Set maximum document size
     #
     if ( $user_agent_max_size > 0 ) {
-        $ua->max_size($user_agent_max_size);
+        $user_agent->max_size($user_agent_max_size);
     }
 
     #
     # Create a temporary cookie jar for the user agent.
     #
     $cookie_jar = HTTP::Cookies->new;
-    $ua->cookie_jar( $cookie_jar );
+    $user_agent->cookie_jar( $cookie_jar );
 
     #
     # Get list of acceptable encodings that this Perl installation
@@ -4236,17 +4282,29 @@ sub Create_User_Agent {
     #
     eval {$accepted_content_encodings = HTTP::Message::decodable; };
     print "HTTP::Message::decodable = $accepted_content_encodings\n" if $debug;
+    
+    #
+    # Create a LWP::UserAgent object
+    #
+    print "Create LWP::UserAgent user agent $user_agent_name\n" if $debug;
+    $lwp_user_agent = LWP::UserAgent->new("$user_agent_name");
+    $lwp_user_agent->ssl_opts(verify_hostname => 0);
+    $lwp_user_agent->timeout("60");
 
     #
-    # Allow POST methods to redirect. This is used if there is a login
-    # form for a site.
+    # Set maximum document size
     #
-    #push @{$ua->requests_redirectable}, "POST";
+    if ( $user_agent_max_size > 0 ) {
+        $lwp_user_agent->max_size($user_agent_max_size);
+    }
 
     #
-    # Return the user agent
+    # Create a temporary cookie jar for the user agent.
     #
-    return $ua;
+    $cookie_jar = HTTP::Cookies->new;
+    $lwp_user_agent->cookie_jar( $cookie_jar );
+
+
 }
 
 #***********************************************************************
@@ -4268,7 +4326,7 @@ sub Crawler_Set_Proxy {
     # Do we have a  user agent ?
     #
     if ( ! defined($user_agent) ) {
-        $user_agent = Create_User_Agent($default_max_urls_between_sleeps);
+        Create_User_Agents();
     }
 
     #
@@ -4529,7 +4587,7 @@ sub Set_Site_URL_Patterns {
 #
 #***********************************************************************
 sub Initialize_Crawler_Variables {
-    my ( $site_dir_e, $site_dir_f, $max_urls_between_sleeps ) = @_;
+    my ($site_dir_e, $site_dir_f) = @_;
 
     my ($dir_e, $dir_f, $day, $month, $year);
     my ($protocol, $query, $new_url);
@@ -4538,7 +4596,7 @@ sub Initialize_Crawler_Variables {
     # Create user agent
     #
     if ( ! defined($user_agent) ) {
-        $user_agent = Create_User_Agent($max_urls_between_sleeps);
+        Create_User_Agents();
     }
 
     #
@@ -4642,6 +4700,62 @@ sub Clear_User_Agent_Robot_Rules {
 
 #***********************************************************************
 #
+# Name: HTTP_Response_Data_Callback
+#
+# Parameters: response - HTTP::Response object
+#             ua - LWP::UserAgent object
+#             h -  HTTP::Headers object
+#             data - data chunk
+#
+# Description:
+#
+#   This function is a callback for a UserAgent->get operation to
+# receive data chunks.  The data is saved to a file.
+#
+# This callback is used rather than the :content_file or other
+# LWP::UserAgent capability due to a bug in libwww in which an
+# IO error may occur when reading binary data over an https
+# connection.
+#
+# Returns:
+#    true
+#
+#***********************************************************************
+sub HTTP_Response_Data_Callback {
+    my ($response, $ua, $h, $data) = @_;
+
+    #
+    # Check response code.
+    #
+    if ( $response->code == 200 ) {
+        #
+        # Print the data to the file handle
+        #
+        $content_length += length($data);
+        print "HTTP_Response_Data_Callback chunk = " . length($data) . " total length = $content_length\n" if $debug;
+        print HTTP_FH $data;
+    }
+    else {
+        print "Response code " . $response->code . "\n" if $debug;
+    }
+
+    #
+    # Erase the content from the HTTP::Response object since it
+    # has been written to a file.  This avoids duplication of the
+    # potentially large amount of data in the file and the response
+    # object.
+    #
+    $response->content("");
+    #print "Response = " . $response->as_string . "\n" if $debug;
+
+    #
+    # Return True to continue to receive data
+    #
+    return(1);
+}
+
+#***********************************************************************
+#
 # Name: Crawler_Get_HTTP_Response
 #
 # Parameters: this_url - a URL
@@ -4659,7 +4773,7 @@ sub Clear_User_Agent_Robot_Rules {
 sub Crawler_Get_HTTP_Response {
     my ( $this_url, $referer_url ) = @_;
 
-    my ($req, $resp, $http_error_code, $http_error );
+    my ($req, $resp, $http_error_code, $http_error, $filename);
     my ($user, $password, $realm, $url, $header, $redirect_domain);
     my ($redirect_protocol, $protocol, $host, $path, $query, $port);
     my ($redirect_file_path, $redirect_query, $redirect_dir, $new_url);
@@ -4673,7 +4787,7 @@ sub Crawler_Get_HTTP_Response {
     # Do we have a  user agent ?
     #
     if ( ! defined($user_agent) ) {
-        $user_agent = Create_User_Agent($default_max_urls_between_sleeps);
+        Create_User_Agents();
     }
 
     #
@@ -4695,6 +4809,17 @@ sub Crawler_Get_HTTP_Response {
     }
 
     #
+    # Are we saving the content in a file ?
+    #
+    if ( $user_agent_content_file ) {
+        (undef, $filename) = tempfile(OPEN => 0);
+        $content_length = 0;
+        $lwp_user_agent->remove_handler("response_data");
+        $lwp_user_agent->add_handler("response_data" => \&HTTP_Response_Data_Callback);
+        $use_simple_request = 0;
+    }
+
+    #
     # Loop, following redirects, until we have the web document
     #
     $url = $this_url;
@@ -4709,6 +4834,7 @@ sub Crawler_Get_HTTP_Response {
         $req->header("Accept" => "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
         $req->header("Pragma" => "no-cache");
         $req->header("Cache-Control" => "no-cache");
+        $req->header("Connection" => "keep-alive");
 
         #
         # Add accepted content encodings
@@ -4716,7 +4842,7 @@ sub Crawler_Get_HTTP_Response {
         if ( defined($accepted_content_encodings) ) {
             $req->header("Accept-Encoding" => $accepted_content_encodings);
         }
-
+        
         #
         # Set referer if we have one.
         #
@@ -4742,7 +4868,25 @@ sub Crawler_Get_HTTP_Response {
             # documents.
             #
             print "Request  = " . $req->as_string . "\n" if $debug;
-            $resp = $user_agent->request($req);
+            
+            #
+            # If we are saving content to a file, use the LWP::UserAgent
+            # rather than the LWP::RobotUA
+            #
+            if ( $user_agent_content_file ) {
+                print "Use LWP::UserAgent to get content in file $filename\n" if $debug;
+                #$lwp_user_agent->prepare_request($req);
+                unlink($filename);
+                open(HTTP_FH, ">$filename");
+                binmode HTTP_FH;
+                $resp = $lwp_user_agent->request($req);
+                close(HTTP_FH);
+            }
+            else {
+                print "Use LWP::RobotUA to get content\n" if $debug;
+                #$user_agent->prepare_request($req);
+                $resp = $user_agent->request($req);
+            }
         }
 
         #
@@ -4756,7 +4900,6 @@ sub Crawler_Get_HTTP_Response {
         # Check for success on GET operation
         #
         if ( !$resp->is_success ) {
-
             #
             # Operation failed, check to see if we received a 401
             # (Not Authorized) error.
@@ -5020,6 +5163,14 @@ sub Crawler_Get_HTTP_Response {
             print "Crawler_Get_HTTP_Response: GET successful\n" if $debug;
             $header = $resp->headers;
             print "Content type = " . $header->content_type . "\n" if $debug;
+
+            #
+            # Did we save the content in a file ?
+            #
+            if ( $user_agent_content_file ) {
+                $header->push_header("WPSS-Content-File" => $filename);
+                print "Set header WPSS-Content-File => $filename\n" if $debug;
+            }
         }
     }
     print "GET url response = $url, Referrer = $referer_url\n" if $debug;
@@ -5027,7 +5178,7 @@ sub Crawler_Get_HTTP_Response {
     #
     # Return the response object
     #
-    return ( $url, $resp );
+    return($url, $resp);
 }
 
 #***********************************************************************
@@ -5715,7 +5866,7 @@ sub Set_Initial_Crawl_List {
 sub Get_Login_Form {
     my ($url, $resp) = @_;
 
-    my (@forms, $this_form, $login_form);
+    my (@forms, $this_form, $login_form, $name);
 
     #
     # Parse forms from content
@@ -5732,28 +5883,32 @@ sub Get_Login_Form {
         # of forms.
         #
         if ( defined($login_form_name) && ($login_form_name ne "") ) {
+            print "Look for form with name or id = \"$login_form_name\"\n" if $debug;
             foreach $this_form (@forms) {
-                if ( $debug ) {
-                    print "Found form ";
-                    if ( defined($this_form->attr("name")) ) {
-                        print "name = " . $this_form->attr("name");
+                #
+                # Check form name attribute
+                #
+                if ( defined($this_form->attr("name")) ) {
+                    $name = $this_form->attr("name");
+                    print "Found form name = \"$name\"\n" if $debug;
+                    if ( $name eq $login_form_name ) {
+                        $login_form = $this_form;
+                        print "Found login form\n" if $debug;
+                        last;
                     }
-                    if ( defined($this_form->attr("id")) ) {
-                        print " id = " . $this_form->attr("id");
-                    }
-                    print "\n" if $debug;
                 }
 
                 #
-                # Check both the name & id attributes
+                # Check form id attribute
                 #
-                if ( (defined($this_form->attr("name")) && 
-                        ($this_form->attr("name") eq $login_form_name)) ||
-                     (defined($this_form->attr("id")) && 
-                        ($this_form->attr("id") eq $login_form_name)) ) {
-                    $login_form = $this_form;
-                    print "Found login form\n" if $debug;
-                    last;
+                if ( defined($this_form->attr("id")) ) {
+                    $name = $this_form->attr("id");
+                    print "Found form id = \"$name\"\n" if $debug;
+                    if ( $name eq $login_form_name ) {
+                        $login_form = $this_form;
+                        print "Found login form\n" if $debug;
+                        last;
+                    }
                 }
             }
         }
@@ -6427,14 +6582,49 @@ sub Content_Checksum {
 
 #***********************************************************************
 #
+# Name: Set_Crawler_Options
+#
+# Parameters: crawler_options - hash table of options
+#
+# Description:
+#   This function sets a number of crawler options.
+#
+#***********************************************************************
+sub Set_Crawler_Options {
+    my ($crawler_options) = @_;
+
+    #
+    # Check for maximum crawl depth
+    #
+    if ( defined($crawler_options)
+         && defined($$crawler_options{"crawl_depth"})) {
+        $max_crawl_depth = $$crawler_options{"crawl_depth"};
+    }
+    else {
+        $max_crawl_depth = 0;
+    }
+
+    #
+    # Check for maximum number of URLs to return
+    #
+    if ( defined($crawler_options)
+         && (defined($$crawler_options{"max_urls_to_return"})) ) {
+        $max_urls_to_return = $$crawler_options{"max_urls_to_return"};
+    }
+    else {
+        $max_urls_to_return = 0;
+    }
+}
+
+#***********************************************************************
+#
 # Name: Crawl_Site
 #
 # Parameters: site_dir_e - English site domain & directory
 #             site_dir_f - French site domain & directory
 #             site_entry_e - English entry page
 #             site_entry_f - French entry page
-#             max_urls_between_sleeps - number of URLs to get between sleeps
-#             this_debug - debug flag
+#             crawler_options - address of a hash table of options
 #             url_list - reference to list to contain list of site URLs
 #             url_type - reference to list to contain URL mime type
 #             url_last_modified - reference to list to contain URL
@@ -6455,33 +6645,21 @@ sub Content_Checksum {
 #***********************************************************************
 sub Crawl_Site {
     my ( $site_dir_e, $site_dir_f, $site_entry_e, $site_entry_f, 
-         $max_urls_between_sleeps, $this_debug, 
-         $url_list, $url_type, $url_last_modified,
+         $crawler_options, $url_list, $url_type, $url_last_modified,
          $url_size, $url_referer ) = @_;
 
-    my (@links, $link, @link_href);
+    my (@links, $link, @link_href, $referer);
     my ($resp, $content, $url, %url_referer_map, @urls_to_crawl);
     my ($n_links, $i, $header, $day, $month, $year, $last_modified);
     my ($rewritten_url, %urls_to_crawl_map, $content_type);
     my (%url_list_map, %url_checksum_map, $checksum, $list_length);
-    my ($size, $lang, $base, $login_url);
+    my ($size, $lang, $base, $login_url, $crawl_depth);
     my ($logged_in) = 0;
 
     #
-    # Set global debug flag.
+    # Set crawler options
     #
-    $debug = $this_debug;
-    if ( $debug ) {
-        print "Crawl_Site: English entry = $site_dir_e/$site_entry_e\n";
-        print "            French  entry = $site_dir_f/$site_entry_f\n";
-    }
-
-    #
-    # Check the maximum number of URLs between sleeps
-    #
-    if ( $max_urls_between_sleeps < 1 ) {
-        $max_urls_between_sleeps = $default_max_urls_between_sleeps;
-    }
+    Set_Crawler_Options($crawler_options);
 
     #
     # Initialize lists to empty lists
@@ -6495,8 +6673,9 @@ sub Crawl_Site {
     #
     # Initialize crawler variables.
     #
-    Initialize_Crawler_Variables($site_dir_e, $site_dir_f,
-                                 $max_urls_between_sleeps);
+    Initialize_Crawler_Variables($site_dir_e, $site_dir_f);
+    print "Crawl_Site: English entry = $site_dir_e/$site_entry_e\n" if $debug;
+    print "            French  entry = $site_dir_f/$site_entry_f\n" if $debug;
 
     #
     # Check for a robots.txt file
@@ -6561,7 +6740,21 @@ sub Crawl_Site {
         print "URLs to crawl list length is $list_length\n" if $debug;
         $url = pop(@urls_to_crawl);
         $urls_to_crawl_map{$url} = 1;
-        print "URL to crawl = $url\n" if $debug;
+        
+        #
+        # Determine the crawl depth if this URL has a referrer
+        #
+        if ( defined($url_referer_map{$url}) ) {
+            $referer = $url_referer_map{$url};
+            $crawl_depth = $url_list_map{$referer} + 1;
+        }
+        else {
+            #
+            # Must be a top level URL
+            #
+            $crawl_depth = 0;
+        }
+        print "Depth $crawl_depth url = $url\n" if $debug;
 
         #
         # Get HTTP::Response object for the URL.
@@ -6618,7 +6811,6 @@ sub Crawl_Site {
             # there may be multiple URLs for the same document.
             #
             if ( defined($url_checksum_map{$checksum}) ) {
-$url_checksum_map{$checksum} . "\n";
                 print "Duplicate content, previously seen at\n  --> " .
                       $url_checksum_map{$checksum} . "\n" if $debug;
                 next;
@@ -6626,7 +6818,7 @@ $url_checksum_map{$checksum} . "\n";
             else {
                 $url_checksum_map{$checksum} = $rewritten_url;
                 $url_checksum_map{$checksum} = $url;
-                $url_list_map{$rewritten_url} = 1;
+                $url_list_map{$rewritten_url} = $crawl_depth;
             }
 
             #
@@ -6639,7 +6831,7 @@ $url_checksum_map{$checksum} . "\n";
             #
             $header = $resp->headers;
             push (@$url_list, $url);
-            $url_list_map{$url} = 1;
+            $url_list_map{$url} = $crawl_depth;
             $content_type = $header->content_type;
             push (@$url_type, $content_type);
 
@@ -6681,6 +6873,15 @@ $url_checksum_map{$checksum} . "\n";
                  ($max_urls_to_return <= @$url_list) ) {
                 print "Reached maximum number of URLs to return $max_urls_to_return\n" if $debug;
                 last;
+            }
+            
+            #
+            # Have we reached the crawl depth ? if so we don't extract links
+            # from this page.
+            #
+            if ( ($max_crawl_depth > 0 ) && ($crawl_depth >= $max_crawl_depth) ) {
+                print "Reached crawl depth, skip URL\n" if $debug;
+                next;
             }
 
             #
@@ -6742,7 +6943,7 @@ $url_checksum_map{$checksum} . "\n";
                 #
                 if ( defined($login_url) && 
                      (! defined($url_list_map{$login_url})) ) {
-                    $url_list_map{$login_url} = 1;
+                    $url_list_map{$login_url} = 0;
                     push (@$url_list, $login_url);
                 }
 

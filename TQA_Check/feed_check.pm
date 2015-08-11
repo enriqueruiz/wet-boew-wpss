@@ -1071,9 +1071,9 @@ return 1;
 #
 # Name:   xml_check.pm
 #
-# $Revision: 6717 $
+# $Revision: 6997 $
 # $URL: svn://10.36.20.226/trunk/Web_Checks/TQA_Check/Tools/feed_check.pm $
-# $Date: 2014-07-22 12:33:59 -0400 (Tue, 22 Jul 2014) $
+# $Date: 2015-01-19 09:48:09 -0500 (Mon, 19 Jan 2015) $
 #
 # Description:
 #
@@ -1170,24 +1170,26 @@ my ($feed_check_fail)       = 1;
 # String table for error strings.
 #
 my %string_table_en = (
-    "Fails validation",           "Fails validation, see validation results for details.",
+    "Fails validation",           "Fails validation",
     "Missing title in",           "Missing <title> in",
     "Missing text in",            "Missing text in",
     "Missing feed language attribute", "Missing <feed> language attribute",
     "Feed language attribute",    "<feed> language attribute",
     "does not match content language", "does not match content language",
+    "Incorrect use of start and end tags", "Incorrect use of start and end tags."
     );
 
 
 
 
 my %string_table_fr = (
-    "Fails validation",             "Échoue la validation, voir les résultats de validation pour plus de détails.",
+    "Fails validation",             "Échoue la validation",
     "Missing title in",             "<title> manquant pour",
     "Missing text in",              "Texte manquant dans",
     "Missing feed language attribute", "Attribut manquant pour <feed>",
     "Feed language attribute",      "L'attribut du langage <feed>",
     "does not match content language",  "ne correspond pas à la langue de contenu",
+    "Incorrect use of start and end tags", "Utilisation incorrecte de début et de fin balises.",
     );
 
 #
@@ -1213,6 +1215,11 @@ sub Set_Feed_Check_Debug {
     # Copy debug value to global variable
     #
     $debug = $this_debug;
+    
+    #
+    # Set debug flag in supporting modules
+    #
+    Feed_Text_Debug($debug);
 }
 
 #**********************************************************************
@@ -1403,7 +1410,7 @@ sub Print_Error {
 #
 #***********************************************************************
 sub Record_Result {
-    my ( $testcase, $line, $column,, $text, $error_string ) = @_;
+    my ($testcase, $line, $column, $text, $error_string) = @_;
 
     my ($result_object);
 
@@ -1464,7 +1471,8 @@ sub Feed_Tag_Handler {
         #
         # Missing language attribute
         #
-        Record_Result("WCAG_2.0-SC3.1.1", -1, -1, "",
+        Record_Result("WCAG_2.0-SC3.1.1", $self->current_line,
+                      $self->current_column, $self->original_string,
                       String_Value("Missing feed language attribute") .
                       " 'xml:lang'");
     }
@@ -1483,7 +1491,6 @@ sub Feed_Tag_Handler {
             print "Web feed language is $lang\n" if $debug;
         }
         else {
-            $lang = $lang;
             print "Unknown web feed language $lang\n" if $debug;
         }
 
@@ -1492,7 +1499,8 @@ sub Feed_Tag_Handler {
         #
         if ( ($current_content_lang_code ne "" ) &&
              ($lang ne $current_content_lang_code) ) {
-            Record_Result("WCAG_2.0-SC3.1.1", -1, -1, "",
+            Record_Result("WCAG_2.0-SC3.1.1", $self->current_line,
+                      $self->current_column, $self->original_string,
                           String_Value("Feed language attribute") .
                           " '$lang' " .
                           String_Value("does not match content language") .
@@ -1631,8 +1639,6 @@ sub Title_Tag_Handler {
 sub Start_Handler {
     my ($self, $tagname, %attr) = @_;
 
-    my ($key, $value);
-
     #
     # Check for entry tag.
     #
@@ -1717,12 +1723,14 @@ sub End_Entry_Tag_Handler {
         # Check entry title
         #
         if ( ! defined($entry_title) ) {
-            Record_Result("WCAG_2.0-F25", -1, 0, "",
+            Record_Result("WCAG_2.0-F25", $self->current_line,
+                          $self->current_column, $self->original_string,
                           String_Value("Missing title in") .
                           " <entry> #$entry_count");
         }
         elsif ( $entry_title eq "" ) {
-            Record_Result("WCAG_2.0-F25", -1, 0, "",
+            Record_Result("WCAG_2.0-F25", $self->current_line,
+                          $self->current_column, $self->original_string,
                           String_Value("Missing text in") .
                           " <entry> #$entry_count <title>");
         }
@@ -1756,12 +1764,14 @@ sub End_Item_Tag_Handler {
         # Check item title
         #
         if ( ! defined($entry_title) ) {
-            Record_Result("WCAG_2.0-F25", -1, 0, "",
+            Record_Result("WCAG_2.0-F25", $self->current_line,
+                          $self->current_column, $self->original_string,
                           String_Value("Missing title in") .
                           " <item> #$entry_count");
         }
         elsif ( $entry_title eq "" ) {
-            Record_Result("WCAG_2.0-F25", -1, 0, "",
+            Record_Result("WCAG_2.0-F25", $self->current_line,
+                          $self->current_column, $self->original_string,
                           String_Value("Missing text in") .
                           " <item> #$entry_count <title>");
         }
@@ -1795,12 +1805,14 @@ sub End_Feed_Tag_Handler {
         # Check feed title
         #
         if ( ! defined($feed_title) ) {
-            Record_Result("WCAG_2.0-F25", -1, 0, "",
+            Record_Result("WCAG_2.0-F25", $self->current_line,
+                          $self->current_column, $self->original_string,
                           String_Value("Missing title in") .
                           " <feed>");
         }
         elsif ( $feed_title eq "" ) {
-            Record_Result("WCAG_2.0-F25", -1, 0, "",
+            Record_Result("WCAG_2.0-F25", $self->current_line,
+                          $self->current_column, $self->original_string,
                           String_Value("Missing text in") .
                           " <feed> <title>");
         }
@@ -1834,12 +1846,14 @@ sub End_RSS_Tag_Handler {
         # Check feed title
         #
         if ( ! defined($feed_title) ) {
-            Record_Result("WCAG_2.0-F25", -1, 0, "",
+            Record_Result("WCAG_2.0-F25", $self->current_line,
+                          $self->current_column, $self->original_string,
                           String_Value("Missing title in") .
                           " <rss>");
         }
         elsif ( $feed_title eq "" ) {
-            Record_Result("WCAG_2.0-F25", -1, 0, "",
+            Record_Result("WCAG_2.0-F25", $self->current_line,
+                          $self->current_column, $self->original_string,
                           String_Value("Missing text in") .
                           " <rss> <title>");
         }
@@ -1969,7 +1983,8 @@ sub Feed_Check {
     my ($this_url, $language, $profile, $content) = @_;
 
     my ($parser, @urls, $url, @tqa_results_list, $result_object, $testcase);
-    my ($eval_output, $lang_code, $lang, $status);
+    my ($eval_output, $lang_code, $lang, $status, @validate_results);
+    my ($feed_content);
 
     #
     # Do we have a valid profile ?
@@ -2008,9 +2023,14 @@ sub Feed_Check {
     }
     else {
         #
+        # Get news feed content
+        #
+        ($lang_code, $feed_content) = Feed_Text_Extract_Text($$content);
+        
+        #
         # Get content language
         #
-        ($lang_code, $lang, $status) = TextCat_XML_Language($$content);
+        ($lang_code, $lang, $status) = TextCat_Text_Language(\$feed_content);
 
         #
         # Did we get a language from the content ?
@@ -2041,6 +2061,7 @@ sub Feed_Check {
         # Parse the content.
         #
         $eval_output = eval { $parser->parse($$content); } ;
+        $eval_output = $@ if $@;
     }
 
     #
@@ -2077,7 +2098,7 @@ sub Import_Packages {
 
     my ($package);
     my (@package_list) = ("tqa_result_object", "tqa_testcases",
-                          "language_map", "textcat");
+                          "language_map", "textcat", "feed_text");
 
     #
     # Import packages, we don't use a 'use' statement as these packages

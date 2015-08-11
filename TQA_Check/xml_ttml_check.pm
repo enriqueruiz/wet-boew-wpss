@@ -1,22 +1,22 @@
 #***********************************************************************
 #
-# Name:   open_data_json.pm
+# Name:   xml_ttml_check.pm
 #
-# $Revision: 7025 $
-# $URL: svn://10.36.21.45/trunk/Web_Checks/Open_Data/Tools/open_data_json.pm $
-# $Date: 2015-03-06 10:17:34 -0500 (Fri, 06 Mar 2015) $
+# $Revision: 6999 $
+# $URL: svn://10.36.20.226/trunk/Web_Checks/TQA_Check/Tools/xml_ttml_check.pm $
+# $Date: 2015-01-19 09:49:46 -0500 (Mon, 19 Jan 2015) $
 #
 # Description:
 #
-#   This file contains routines that parse JSON APIs and check for
-# a number of open data check points.
+#   This file contains routines that parse TTML XML files and check for
+# a number of acceessibility (WCAG) check points.
 #
 # Public functions:
-#     Set_Open_Data_JSON_Language
-#     Set_Open_Data_JSON_Debug
-#     Set_Open_Data_JSON_Testcase_Data
-#     Set_Open_Data_JSON_Test_Profile
-#     Open_Data_JSON_Check_API
+#     Set_XML_TTML_Check_Language
+#     Set_XML_TTML_Check_Debug
+#     Set_XML_TTML_Check_Testcase_Data
+#     Set_XML_TTML_Check_Test_Profile
+#     XML_TTML_Check
 #
 # Terms and Conditions of Use
 #
@@ -48,12 +48,12 @@
 #
 #***********************************************************************
 
-package open_data_json;
+package xml_ttml_check;
 
 use strict;
 use URI::URL;
 use File::Basename;
-use JSON;
+use XML::Parser;
 
 #***********************************************************************
 #
@@ -65,11 +65,11 @@ BEGIN {
     use vars qw($VERSION @ISA @EXPORT);
 
     @ISA     = qw(Exporter);
-    @EXPORT  = qw(Set_Open_Data_JSON_Language
-                  Set_Open_Data_JSON_Debug
-                  Set_Open_Data_JSON_Testcase_Data
-                  Set_Open_Data_JSON_Test_Profile
-                  Open_Data_JSON_Check_API
+    @EXPORT  = qw(Set_XML_TTML_Check_Language
+                  Set_XML_TTML_Check_Debug
+                  Set_XML_TTML_Check_Testcase_Data
+                  Set_XML_TTML_Check_Test_Profile
+                  XML_TTML_Check
                   );
     $VERSION = "1.0";
 }
@@ -83,27 +83,29 @@ BEGIN {
 my ($debug) = 0;
 my (%testcase_data, $results_list_addr);
 my (@paths, $this_path, $program_dir, $program_name, $paths);
-my (%open_data_profile_map, $current_open_data_profile, $current_url);
-my ($tag_count);
+my (%xml_ttml_check_profile_map, $current_xml_ttml_check_profile, $current_url);
+my ($save_text_between_tags, $saved_text, $current_content_lang_code);
 
 my ($max_error_message_string)= 2048;
 
 #
 # Status values
 #
-my ($check_fail)       = 1;
+my ($xml_ttml_check_fail) = 1;
 
 #
 # String table for error strings.
 #
 my %string_table_en = (
-    "Fails validation",            "Fails validation",
-    "No content in API", "No content in API",
+    "does not match content language", "does not match content language",
+    "Missing tt language attribute",   "Missing <tt> language attribute",
+    "TT language attribute",           "<tt> language attribute",
     );
 
 my %string_table_fr = (
-    "Fails validation",            "Échoue la validation",
-    "No content in API", "Aucun contenu dans API",
+    "does not match content language", "ne correspond pas à la langue de contenu",
+    "Missing tt language attribute",   "Attribut manquant pour <tt>",
+    "TT language attribute",           "L'attribut du langage <tt>",
     );
 
 #
@@ -113,7 +115,7 @@ my ($string_table) = \%string_table_en;
 
 #***********************************************************************
 #
-# Name: Set_Open_Data_JSON_Debug
+# Name: Set_XML_TTML_Check_Debug
 #
 # Parameters: this_debug - debug flag
 #
@@ -122,7 +124,7 @@ my ($string_table) = \%string_table_en;
 #   This function sets the package global debug flag.
 #
 #***********************************************************************
-sub Set_Open_Data_JSON_Debug {
+sub Set_XML_TTML_Check_Debug {
     my ($this_debug) = @_;
 
     #
@@ -133,7 +135,7 @@ sub Set_Open_Data_JSON_Debug {
 
 #**********************************************************************
 #
-# Name: Set_Open_Data_JSON_Language
+# Name: Set_XML_TTML_Check_Language
 #
 # Parameters: language
 #
@@ -143,7 +145,7 @@ sub Set_Open_Data_JSON_Debug {
 # by this module.
 #
 #***********************************************************************
-sub Set_Open_Data_JSON_Language {
+sub Set_XML_TTML_Check_Language {
     my ($language) = @_;
 
     #
@@ -196,7 +198,7 @@ sub String_Value {
 
 #***********************************************************************
 #
-# Name: Set_Open_Data_JSON_Testcase_Data
+# Name: Set_XML_TTML_Check_Testcase_Data
 #
 # Parameters: testcase - testcase identifier
 #             data - string of data
@@ -207,7 +209,7 @@ sub String_Value {
 # for the specified testcase identifier.
 #
 #***********************************************************************
-sub Set_Open_Data_JSON_Testcase_Data {
+sub Set_XML_TTML_Check_Testcase_Data {
     my ($testcase, $data) = @_;
 
     #
@@ -218,36 +220,36 @@ sub Set_Open_Data_JSON_Testcase_Data {
 
 #***********************************************************************
 #
-# Name: Set_Open_Data_JSON_Test_Profile
+# Name: Set_XML_TTML_Check_Test_Profile
 #
-# Parameters: profile - open data check test profile
-#             testcase_names - hash table of testcase name
+# Parameters: profile - XML check test profile
+#             xml_ttml_checks - hash table of testcase name
 #
 # Description:
 #
 #   This function copies the passed table to unit global variables.
-# The hash table is indexed by open data testcase name.
+# The hash table is indexed by XML testcase name.
 #
 #***********************************************************************
-sub Set_Open_Data_JSON_Test_Profile {
-    my ($profile, $testcase_names) = @_;
+sub Set_XML_TTML_Check_Test_Profile {
+    my ($profile, $xml_ttml_checks) = @_;
 
-    my (%local_testcase_names);
+    my (%local_xml_ttml_checks);
 
     #
     # Make a local copy of the hash table as we will be storing the address
     # of the hash.
     #
-    print "Set_Open_Data_JSON_Test_Profile, profile = $profile\n" if $debug;
-    %local_testcase_names = %$testcase_names;
-    $open_data_profile_map{$profile} = \%local_testcase_names;
+    print "Set_XML_TTML_Check_Test_Profile, profile = $profile\n" if $debug;
+    %local_xml_ttml_checks = %$xml_ttml_checks;
+    $xml_ttml_check_profile_map{$profile} = \%local_xml_ttml_checks;
 }
 
 #***********************************************************************
 #
 # Name: Initialize_Test_Results
 #
-# Parameters: profile - open data check test profile
+# Parameters: profile - XML check test profile
 #             local_results_list_addr - address of results list.
 #
 # Description:
@@ -261,8 +263,15 @@ sub Initialize_Test_Results {
     #
     # Set current hash tables
     #
-    $current_open_data_profile = $open_data_profile_map{$profile};
+    $current_xml_ttml_check_profile = $xml_ttml_check_profile_map{$profile};
     $results_list_addr = $local_results_list_addr;
+    
+    #
+    # Initialize global variables
+    #
+    $save_text_between_tags = 0;
+    $saved_text = "";
+    $current_content_lang_code = "unknown";
 }
 
 #***********************************************************************
@@ -306,21 +315,22 @@ sub Print_Error {
 #
 #***********************************************************************
 sub Record_Result {
-    my ( $testcase, $line, $column,, $text, $error_string ) = @_;
+    my ( $testcase, $line, $column, $text, $error_string ) = @_;
 
     my ($result_object);
 
     #
     # Is this testcase included in the profile
     #
-    if ( defined($testcase) && defined($$current_open_data_profile{$testcase}) ) {
+    if ( defined($testcase) && defined($$current_xml_ttml_check_profile{$testcase}) ) {
         #
         # Create result object and save details
         #
-        $result_object = tqa_result_object->new($testcase, $check_fail,
-                                                Open_Data_Testcase_Description($testcase),
+        $result_object = tqa_result_object->new($testcase, $xml_ttml_check_fail,
+                                                TQA_Testcase_Description($testcase),
                                                 $line, $column, $text,
                                                 $error_string, $current_url);
+        $result_object->testcase_groups(TQA_Testcase_Groups($testcase));
         push (@$results_list_addr, $result_object);
 
         #
@@ -332,29 +342,166 @@ sub Record_Result {
 
 #***********************************************************************
 #
-# Name: Open_Data_JSON_Check_API
+# Name: TT_Tag_Handler
 #
-# Parameters: this_url - a URL
-#             profile - testcase profile
-#             filename - JSON content filename
+# Parameters: self - reference to this parser
+#             tagname - name of tag
+#             attr - hash table of attributes
 #
 # Description:
 #
-#   This function runs a number of open data checks on JSON API content.
+#   This function handles the <tt> tag.  It checks for an xml:lang attribute.
 #
 #***********************************************************************
-sub Open_Data_JSON_Check_API {
-    my ( $this_url, $profile, $filename) = @_;
+sub TT_Tag_Handler {
+    my ($self, $tagname, %attr) = @_;
 
-    my (@tqa_results_list, $result_object, $testcase, $eval_output, $ref);
-    my ($content, $line);
+    my ($lang);
+
+    #
+    # Do we have a language attribute ?
+    #
+    if ( ! defined($attr{"xml:lang"}) ) {
+        #
+        # Missing language attribute
+        #
+        Record_Result("WCAG_2.0-SC3.1.1", $self->current_line,
+                      $self->current_column, $self->original_string,
+                      String_Value("Missing tt language attribute") .
+                      " 'xml:lang'");
+    }
+    else {
+        #
+        # Save language code, but strip off any dialect value
+        #
+        $lang = lc($attr{"xml:lang"});
+        $lang =~ s/-.*$//g;
+
+        #
+        # Convert possible 2 character language code into a 3 character code.
+        #
+        if ( defined($language_map::iso_639_1_iso_639_2T_map{$lang}) ) {
+            $lang = $language_map::iso_639_1_iso_639_2T_map{$lang};
+            print "tt language is $lang\n" if $debug;
+        }
+        else {
+            print "Unknown tt language $lang\n" if $debug;
+        }
+
+        #
+        # Does the lang attribute match the content language ?
+        #
+        if ( ($current_content_lang_code ne "" ) &&
+             ($lang ne $current_content_lang_code) ) {
+            Record_Result("WCAG_2.0-SC3.1.1", $self->current_line,
+                      $self->current_column, $self->original_string,
+                          String_Value("TT language attribute") .
+                          " '$lang' " .
+                          String_Value("does not match content language") .
+                          " '$current_content_lang_code'");
+        }
+    }
+}
+
+#***********************************************************************
+#
+# Name: Start_Handler
+#
+# Parameters: self - reference to this parser
+#             tagname - name of tag
+#             attr - hash table of attributes
+#
+# Description:
+#
+#   This function is a callback handler for XML parsing that
+# handles the start of XML tags.
+#
+#***********************************************************************
+sub Start_Handler {
+    my ($self, $tagname, %attr) = @_;
+
+    #
+    # Check tags.
+    #
+    print "Start_Handler tag $tagname\n" if $debug;
+    if ( $tagname eq "tt" ) {
+        TT_Tag_Handler($self, $tagname, %attr);
+    }
+}
+
+#***********************************************************************
+#
+# Name: End_Handler
+#
+# Parameters: self - reference to this parser
+#             tagname - name of tag
+#
+# Description:
+#
+#   This function is a callback handler for XML parsing that
+# handles end tags.
+#
+#***********************************************************************
+sub End_Handler {
+    my ($self, $tagname) = @_;
+
+    #
+    # Check tag
+    #
+    print "End_Handler tag $tagname\n" if $debug;
+
+}
+
+#***********************************************************************
+#
+# Name: Char_Handler
+#
+# Parameters: self - reference to this parser
+#             string - text
+#
+# Description:
+#
+#   This function is a callback handler for XML parsing that
+# handles text content between tags.
+#
+#***********************************************************************
+sub Char_Handler {
+    my ($self, $string) = @_;
+
+    #
+    # Are we saving text ?
+    #
+    if ( $save_text_between_tags ) {
+        $saved_text .= $string;
+    }
+}
+
+#***********************************************************************
+#
+# Name: XML_TTML_Check
+#
+# Parameters: this_url - a URL
+#             language - URL language
+#             profile - testcase profile
+#             content - XML content pointer
+#
+# Description:
+#
+#   This function runs a number of technical QA checks on XML content.
+#
+#***********************************************************************
+sub XML_TTML_Check {
+    my ($this_url, $language, $profile, $content) = @_;
+
+    my (@tqa_results_list, $result_object, $parser, $eval_output);
+    my ($lang_code, $lang, $ttml_content, $status);
 
     #
     # Do we have a valid profile ?
     #
-    print "Open_Data_JSON_Check_API: Checking URL $this_url, profile = $profile\n" if $debug;
-    if ( ! defined($open_data_profile_map{$profile}) ) {
-        print "Open_Data_JSON_Check_API: Unknown testcase profile passed $profile\n";
+    print "XML_TTML_Check: Checking URL $this_url, lanugage = $language, profile = $profile\n" if $debug;
+    if ( ! defined($xml_ttml_check_profile_map{$profile}) ) {
+        print "XML_TTML_Check: Unknown XML testcase profile passed $profile\n";
         return(@tqa_results_list);
     }
 
@@ -366,28 +513,12 @@ sub Open_Data_JSON_Check_API {
     }
     else {
         #
-        # Doesn't look like a URL.  Could be just a block of JSON
+        # Doesn't look like a URL.  Could be just a block of XML
         # from the standalone validator which does not have a URL.
         #
         $current_url = "";
     }
 
-    #
-    # Open the API content file
-    #
-    open(FH, "$filename") ||
-        die "Open_Data_JSON_Check_API: Failed to open $filename for reading\n";
-    binmode FH;
-
-    #
-    # Read the content
-    #
-    $content = "";
-    while ( $line = <FH> ) {
-        $content .= $line;
-    }
-    close(FH);
-    
     #
     # Initialize the test case pass/fail table.
     #
@@ -397,33 +528,61 @@ sub Open_Data_JSON_Check_API {
     # Did we get any content ?
     #
     if ( length($$content) == 0 ) {
-        print "No content passed to Open_Data_JSON_Check_API\n" if $debug;
-        Record_Result("OD_API_3", -1, 0, "",
-                      String_Value("No content in API"));
+        print "No content passed to XML_TTML_Check\n" if $debug;
+        return(@tqa_results_list);
     }
     else {
         #
-        # Parse the content.
+        # Get TTML content
         #
-        $eval_output = eval { $ref = decode_json($content); 1 } ;
+        ($lang_code, $ttml_content) = XML_TTML_Text_Extract_Text($$content);
 
         #
-        # Did the parse fail ?
+        # Get content language
         #
-        if ( ! $eval_output ) {
-            $eval_output =~ s/ at \S* line \d*$//g;
-            Record_Result("OD_API_3", -1, 0, "$eval_output",
-                          String_Value("Fails validation"));
+        ($lang_code, $lang, $status) = TextCat_Text_Language(\$ttml_content);
+
+        #
+        # Did we get a language from the content ?
+        #
+        if ( $status == 0 ) {
+            #
+            # Save language in a global variable
+            #
+            $current_content_lang_code = $lang_code;
         }
+        else {
+            $current_content_lang_code = "";
+        }
+
+        #
+        # Create a document parser
+        #
+        print "XML_TTML_Check\n" if $debug;
+        $parser = XML::Parser->new;
+
+        #
+        # Add handlers for some of the XML tags
+        #
+        $parser->setHandlers(Start => \&Start_Handler);
+        $parser->setHandlers(End => \&End_Handler);
+
+        #
+        # Parse the content.
+        #
+        eval { $parser->parse($$content, ErrorContext => 2); };
+        $eval_output = $@ if $@;
+        print "Eval output = \"$eval_output\"\n" if $debug;
     }
 
     #
     # Print testcase information
     #
     if ( $debug ) {
-        print "Open_Data_JSON_Check_API results\n";
+        print "XML_TTML_Check results\n";
         foreach $result_object (@tqa_results_list) {
             print "Testcase: " . $result_object->testcase;
+            print "  status   = " . $result_object->status . "\n";
             print "  message  = " . $result_object->message . "\n";
         }
     }
@@ -449,7 +608,8 @@ sub Open_Data_JSON_Check_API {
 sub Import_Packages {
 
     my ($package);
-    my (@package_list) = ("tqa_result_object", "open_data_testcases");
+    my (@package_list) = ("tqa_result_object", "tqa_testcases",
+                          "language_map", "textcat", "xml_ttml_text");
 
     #
     # Import packages, we don't use a 'use' statement as these packages

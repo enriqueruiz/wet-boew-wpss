@@ -535,9 +535,9 @@ return 1;
 #
 # Name:   html_validate.pm
 #
-# $Revision: 6709 $
-# $URL: svn://10.36.20.226/trunk/Web_Checks/HTML_Validate/Tools/html_validate.pm $
-# $Date: 2014-07-22 12:18:41 -0400 (Tue, 22 Jul 2014) $
+# $Revision: 7039 $
+# $URL: svn://10.36.21.45/trunk/Web_Checks/HTML_Validate/Tools/html_validate.pm $
+# $Date: 2015-03-20 11:27:07 -0400 (Fri, 20 Mar 2015) $
 #
 # Description:
 #
@@ -583,6 +583,8 @@ package html_validate;
 use strict;
 use File::Basename;
 use HTML::Parser;
+use Encode;
+use JSON;
 use File::Temp qw/ tempfile tempdir /;
 
 #***********************************************************************
@@ -612,21 +614,25 @@ my (@paths, $this_path, $program_dir, $program_name, $paths, $validate_cmnd);
 my ($doctype_label, $doctype_version, $doctype_class);
 
 my ($debug) = 0;
-my ($html5_validation_error_reported) = 0;
-
 my ($VALID_HTML) = 1;
 my ($INVALID_HTML) = 0;
+my ($MAX_SOURCE_LINE_SIZE) = 100;
 
 #
 # String table for error strings.
 #
 my %string_table_en = (
-    "No HTML5 validator",    "No HTML5 validator, use W3C validator",
+    "Error",                 "Error: ",
+    "Line",                  "Line",
+    "column",                "column",
+    "Source line",           "Source line:",
 );
 
 my %string_table_fr = (
-    "No HTML5 validator",    "Pas un validateur HTML5, utiliser le validateur du W3C",
-,
+    "Error",                 "Erreur: ",
+    "Line",                  "Ligne",
+    "column",                "colonne",
+    "Source line",           "Ligne de la source:",
 );
 
 #
@@ -792,6 +798,201 @@ sub Validate_XHTML_Content {
 
 #***********************************************************************
 #
+# Name: Validate_HTML5_Content
+#
+# Parameters: this_url - a URL
+#             content - HTML content pointer
+#
+# Description:
+#
+#   This function runs the Nu Markup Checker (v.Nu) on the supplied content
+# and returns the validation status result.
+#
+#***********************************************************************
+sub Validate_HTML5_Content {
+    my ($this_url, $content) = @_;
+
+    my ($validator_output, $line, $html_file_name, @results_list);
+    my ($result_object, $fh, $ref, $messages, $eval_output, $item);
+    my ($ref_type, $messages, $errors, $line_no, $column_no, $message);
+    my (@lines, $source_line, $start_col);
+
+    #
+    # Write the content to a temporary file
+    #
+    print "Validate_HTML5_Content create temporary HTML file\n" if $debug;
+    ($fh, $html_file_name) = tempfile( SUFFIX => '.html');
+    if ( ! defined($fh) ) {
+        print "Error: Failed to create temporary file in Validate_HTML5_Content\n";
+        return(@results_list);
+    }
+    binmode $fh;
+    print $fh $$content;
+    close($fh);
+    
+    #
+    # split source on new-line
+    #
+    @lines = split(/\n/, $$content);
+
+    #
+    # Run the Nu Markup Checker on the supplied content
+    #
+    print "Run Nu Markup Checker\n --> java -jar \"$program_dir/lib/vnu.jar\" $html_file_name 2>\&1\n" if $debug;
+    $validator_output = `java -Xss512k -jar "$program_dir/lib/vnu.jar" --errors-only --format json $html_file_name 2>\&1`;
+    print "Validator output = $validator_output\n" if $debug;
+
+    #
+    # Do we have any output ?
+    #
+    if ( $validator_output ne "" ) {
+        #
+        # Decode the JSON output
+        #
+        $eval_output = eval { $ref = decode_json($validator_output); 1 } ;
+
+        #
+        # Get the messages structure from the JSON object
+        #
+        $errors = "";
+        if ( defined($$ref{"messages"}) ) {
+            $messages = $$ref{"messages"};
+
+            #
+            # Is it an array ?
+            #
+            $ref_type = ref $messages;
+            if ( $ref_type eq "ARRAY" ) {
+                foreach $item (@$messages) {
+                    #
+                    # Ignore messages about malformed byte sequences.  This
+                    # happens sometimes if there are UTF-8 characters in
+                    # the HTML content.
+                    #
+                    if ( defined($$item{"message"})
+                         && ($$item{"message"} =~ /^Malformed byte sequence/i) ) {
+                        next;
+                    }
+
+                    #
+                    # Get at the location and message
+                    #
+                    if ( defined($$item{"lastLine"}) ) {
+                        $line_no = $$item{"lastLine"};
+                    }
+                    else {
+                        $line_no = 0;
+                    }
+                    if ( defined($$item{"lastColumn"}) ) {
+                        $column_no = $$item{"lastColumn"};
+                    }
+                    else {
+                        $column_no = 0;
+                    }
+                    if ( defined($$item{"message"}) ) {
+                        $message = $$item{"message"};
+                        
+                        #
+                        # Convert windows smart quotes into quotes
+                        #
+                        $message =~ s/[^[:ascii:]]+/'/g;
+                    }
+                    else {
+                        $message = "";
+                    }
+                    
+                    #
+                    # Add this message to the list of errors
+                    #
+                    if ( $message ne "" ) {
+                        #
+                        # Get HTML source line fragment substring
+                        # starting position.
+                        #
+                        if ( length($lines[$line_no - 1]) > $MAX_SOURCE_LINE_SIZE ) {
+                            if ( $column_no < $MAX_SOURCE_LINE_SIZE ) {
+                                if ( $column_no < 50 ) {
+                                    $start_col = 0;
+                                }
+                                else {
+                                    $start_col = $column_no - 50;
+                               }
+                            }
+                            else {
+                                $start_col = $column_no - 50;
+                            }
+                        }
+                        else {
+                            $start_col = 0;
+                        }
+
+                        #
+                        # Get source line fragment.
+                        #
+                        $source_line = substr($lines[$line_no - 1], $start_col,
+                                              $MAX_SOURCE_LINE_SIZE);
+                                              
+                        #
+                        # Add this error to the error messages.
+                        #
+                        print "Error at $line_no:$column_no message = $message\n" if $debug;
+                        $errors .= String_Value("Error") . $message . "\n" .
+                                   String_Value("Line") . " $line_no, " .
+                                   String_Value("column") . " $column_no\n" .
+                                   String_Value("Source line") . " $source_line\n\n";
+                    }
+                }
+            }
+            else {
+                print "Messages is not a array, $ref_type\n" if $debug;
+            }
+        }
+        #
+        # Look from error with Java
+        #
+        elsif ( $validator_output =~ /is not recognized/i ) {
+            print "Error, validator failed to run\n" if $debug;
+            $errors .= String_Value("Error") . $validator_output . "\n";
+        }
+        else {
+            #
+            # No messages table
+            #
+            print "No messages table\n" if $debug;
+        }
+
+        #
+        # Create testcase results object for validation failure
+        #
+        if ( $errors ne "" ) {
+            $result_object = tqa_result_object->new("HTML_VALIDATION",
+                                                    1, "HTML_VALIDATION",
+                                                    -1, -1, "",
+                                                    $errors,
+                                                    $this_url);
+            push (@results_list, $result_object);
+        }
+    }
+    else {
+        #
+        # No output from validator, either no errors or the validator failed
+        #
+        print "No validator output\n" if $debug;
+    }
+
+    #
+    # Clean up temporary files
+    #
+    unlink($html_file_name);
+
+    #
+    # Return error list
+    #
+    return(@results_list);
+}
+
+#***********************************************************************
+#
 # Name: Declaration_Handler
 #
 # Parameters: text - declaration text
@@ -846,7 +1047,6 @@ sub Declaration_Handler {
         $doctype_version = 5.0;
         $doctype_class = "";
     }
-    print "DOCTYPE label = $doctype_label, version = $doctype_version, class = $doctype_class\n" if $debug;
 }
 
 #***********************************************************************
@@ -870,8 +1070,9 @@ sub Get_Doctype {
     # Initialize doctype values
     #
     print "Get_Doctype\n" if $debug;
-    $doctype_label = "HTML";
-    $doctype_version = 4;
+    $doctype_label = "";
+    $doctype_version = 0;
+    $doctype_class = "";
 
     #
     # Create a document parser
@@ -890,6 +1091,7 @@ sub Get_Doctype {
     # Parse the content.
     #
     $parser->parse($$content);
+    print "DOCTYPE label = $doctype_label, version = $doctype_version, class = $doctype_class\n" if $debug;
 }
 
 #***********************************************************************
@@ -933,20 +1135,7 @@ sub HTML_Validate_Content {
                                                    $content);
         }
         elsif ( ($doctype_label =~ /html/i ) && ($doctype_version == 5) ) {
-            #
-            # Can't do HTML 5 validation, report error only once
-            # per tool run.
-            #
-            if ( ! $html5_validation_error_reported ) {
-                $result_object = tqa_result_object->new("HTML_VALIDATION",
-                                                        1,
-                                                        "HTML_VALIDATION",
-                                                        -1, -1, "",
-                                            String_Value("No HTML5 validator"),
-                                                        $this_url);
-                push (@results_list, $result_object);
-                $html5_validation_error_reported = 1;
-            }
+            @results_list = Validate_HTML5_Content($this_url, $content);
         }
         else {
             print "No validator for $doctype_label version $doctype_version\n" if $debug;

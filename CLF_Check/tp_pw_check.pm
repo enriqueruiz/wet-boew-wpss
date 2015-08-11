@@ -3101,9 +3101,9 @@ return 1;
 #
 # Name:   tp_pw_check.pm
 #
-# $Revision: 6703 $
-# $URL: svn://10.36.20.226/trunk/Web_Checks/CLF_Check/Tools/tp_pw_check.pm $
-# $Date: 2014-07-22 12:15:54 -0400 (Tue, 22 Jul 2014) $
+# $Revision: 7053 $
+# $URL: svn://10.36.21.45/trunk/Web_Checks/CLF_Check/Tools/tp_pw_check.pm $
+# $Date: 2015-04-02 11:12:53 -0400 (Thu, 02 Apr 2015) $
 #
 # Description:
 #
@@ -3200,7 +3200,7 @@ my ($current_url, %template_integrity, %template_version, %site_inc_version);
 my ($current_heading_level, $have_text_handler, %section_h1_count);
 my (%found_template_markers, $current_clf_check_profile_name);
 my ($valid_search_actions, $expected_search_inputs);
-my ($in_search_form);
+my ($in_search_form, $in_noscript);
 
 my ($max_error_message_string) = 2048;
 
@@ -3701,50 +3701,6 @@ sub Set_TP_PW_Check_Testcase_Data {
         }
     }
     #
-    # Do we have TP_PW_SITE testcase specific data?
-    #
-    elsif ( $testcase eq "TP_PW_SITE" ) {
-        #
-        # Get the site includes data type
-        #
-        ($type, $value) = split(/\s+/, $data, 2);
-
-        #
-        # Do we have a site includes directory ?
-        #
-        if ( ($type eq "DIRECTORY") && defined($value) ) {
-            if ( ! ($object->has_field("site_inc_directory")) ) {
-                $object->add_field("site_inc_directory", "scalar");
-                $object->set_scalar_field("site_inc_directory", $value);
-            }
-        }
-        #
-        # Do we have the site includes repository ?
-        #
-        elsif ( ($type eq "REPOSITORY") && defined($value) ) {
-            if ( ! ($object->has_field("site_inc_repository")) ) {
-                $object->add_field("site_inc_repository", "scalar");
-                $object->set_scalar_field("site_inc_repository", $value);
-            }
-        }
-        #
-        # Do we have a trusted domain ? one that we do not
-        # have to perform a check of site includes.
-        #
-        elsif ( ($type eq "TRUSTED") && defined($value) ) {
-            if ( ! ($object->has_field("trusted_site_inc_domains")) ) {
-                $object->add_field("trusted_site_inc_domains", "hash");
-            }
-            $hash = $object->get_field("trusted_site_inc_domains");
-
-            #
-            # Save trusted domain value
-            #
-            $$hash{$value} = 1;
-
-        }
-    }
-    #
     # Do we have TP_PW_SRCH testcase specific data?
     #
     elsif ( $testcase eq "TP_PW_SRCH" ) {
@@ -3911,6 +3867,7 @@ sub Initialize_Test_Results {
     $have_text_handler = 0;
     %section_h1_count = ();
     $in_search_form = 0;
+    $in_noscript = 0;
     if ( defined($required_template_markers) ) {
         %found_template_markers = %$required_template_markers;
     }
@@ -4142,9 +4099,11 @@ sub Frame_Tag_Handler {
 
     #
     # Found a Frame tag, set flag so we can verify that the doctype
-    # class is frameset
+    # class is frameset.  We ignore frames inside a <noscript> tag.
     #
-    $found_frame_tag = 1;
+    if ( ! $in_noscript ) {
+        $found_frame_tag = 1;
+    }
 }
 
 #***********************************************************************
@@ -4505,6 +4464,30 @@ sub Check_Attributes {
 
 #***********************************************************************
 #
+# Name: Noscript_Tag_Handler
+#
+# Parameters: self - reference to this parser
+#             line - line number
+#             column - column number
+#             text - text from tag
+#             attr - hash table of attributes
+#
+# Description:
+#
+#   This function handles the noscript tag.
+#
+#***********************************************************************
+sub Noscript_Tag_Handler {
+    my ( $self, $line, $column, $text, %attr ) = @_;
+
+    #
+    # Inside noscript, set global flag.
+    #
+    $in_noscript = 1;
+}
+
+#***********************************************************************
+#
 # Name: Start_Handler
 #
 # Parameters: self - reference to this parser
@@ -4574,6 +4557,14 @@ sub Start_Handler {
     }
 
     #
+    # Check h tag
+    #
+    elsif ( $tagname =~ /^h[0-9]?$/ ) {
+        Start_H_Tag_Handler( $self, $tagname, $line, $column, $text,
+                            %attr_hash );
+    }
+
+    #
     # Check input tag
     #
     elsif ( $tagname eq "input" ) {
@@ -4588,11 +4579,10 @@ sub Start_Handler {
     }
 
     #
-    # Check h tag
+    # Check noscript tag
     #
-    elsif ( $tagname =~ /^h[0-9]?$/ ) {
-        Start_H_Tag_Handler( $self, $tagname, $line, $column, $text,
-                            %attr_hash );
+    elsif ( $tagname eq "noscript" ) {
+        Noscript_Tag_Handler( $self, $line, $column, $text, %attr_hash );
     }
 }
 
@@ -4759,6 +4749,30 @@ sub End_Form_Tag_Handler {
 
 #***********************************************************************
 #
+# Name: End_Noscript_Tag_Handler
+#
+# Parameters: self - reference to this parser
+#             line - line number
+#             column - column number
+#             text - text from tag
+#
+# Description:
+#
+#   This function is a callback handler for HTML parsing that
+# handles the end noscript tag.
+#
+#***********************************************************************
+sub End_Noscript_Tag_Handler {
+    my ( $self, $line, $column, $text ) = @_;
+
+    #
+    # End of noscript
+    #
+    $in_noscript = 0;
+}
+
+#***********************************************************************
+#
 # Name: End_Handler
 #
 # Parameters: self - reference to this parser
@@ -4796,6 +4810,13 @@ sub End_Handler {
     #
     elsif ( $tagname eq "form" ) {
         End_Form_Tag_Handler( $self, $line, $column, $text);
+    }
+
+    #
+    # Check noscript tag
+    #
+    elsif ( $tagname eq "noscript" ) {
+        End_Noscript_Tag_Handler( $self, $line, $column, $text);
     }
 
     #
@@ -5239,161 +5260,6 @@ sub Verify_Template_Checksums {
         # Completed template integrity check for this domain.
         #
         $template_integrity{$domain} = 1;
-    }
-}
-
-#***********************************************************************
-#
-# Name: Verify_Site_Includes_Version
-#
-# Parameters: domain - protocol and domain of server
-#             template_directory_parent - template top level directory
-#             site_inc_subdirectory - site includes subdirectory
-#             profile - template profile
-#
-# Description:
-#
-#    This function verifies the version of the site includes package.  It
-# checks that the version on the supplied domain matches the version
-# in the site includes repository.
-#
-#***********************************************************************
-sub Verify_Site_Includes_Version {
-    my ($domain, $template_directory_parent, $site_inc_subdirectory,
-        $profile) = @_;
-
-    my ($version_url, $url, $resp, $line, $file_path);
-    my ($local_version, $repository_versions, $version_string, $valid_version);
-    my ($object, $site_inc_repository, $trusted_site_inc_domains);
-    my ($site_inc_directory);
-
-    #
-    # Get testcase data object
-    $object = $testcase_data_objects{$profile};
-
-    #
-    # Get site includes repository and directory values
-    #
-    $site_inc_repository = $object->get_field("site_inc_repository");
-    $site_inc_directory = $object->get_field("site_inc_directory");
-
-    #
-    # Get table of trusted site include domain values
-    #
-    $trusted_site_inc_domains = $object->get_field("trusted_site_inc_domains");
-
-    #
-    # Is this a trusted domain or a local file (domain = file:) ? 
-    # if so we don't have to check the site includes version.
-    #
-    print "Verify_Site_Includes_Version for domain $domain\n" if $debug;
-    if ( ($domain =~ /^file:/i) || 
-         (defined($trusted_site_inc_domains) &&
-          defined($$trusted_site_inc_domains{$domain})) ) {
-        print "Skipping site includes version check for domain $domain\n" if $debug;
-        return;
-    }
-
-    #
-    # Do we have a site includes repository value ?
-    #
-    if ( ! defined($site_inc_repository) ) {
-        return;
-    }
-
-    #
-    # Have we already checked the site includes version for this domain ?
-    #
-    if ( ! defined($site_inc_version{$domain}) ) {
-        #
-        # Get the site includes version information from the site
-        # includes subdirectory (may not exist in older packages)
-        #
-        $version_url = "$domain/$template_directory_parent$site_inc_directory/$site_inc_subdirectory/version.txt";
-        print "Get site includes version file $version_url\n" if $debug;
-        ($url, $resp) = Crawler_Get_HTTP_Response($version_url, "");
-
-        #
-        # Did we get the version file ?
-        #
-        if ( ! defined($resp) || (! $resp->is_success) ) {
-            #
-            # Get the site includes version information from the top
-            # level site includes directory.
-            #
-            $version_url = "$domain/$template_directory_parent$site_inc_directory/version.txt";
-            print "Get site includes version file $version_url\n" if $debug;
-            ($url, $resp) = Crawler_Get_HTTP_Response($version_url, "");
-        }
-
-        #
-        # Did we get the version file ?
-        #
-        if ( defined($resp) && $resp->is_success ) {
-            #
-            # Get the site includes version value.
-            # Strip off any possible trailing CR/LF.
-            #
-            $local_version = $resp->content;
-            chop($local_version);
-            $local_version =~ s/\r$//g;
-            $local_version =~ s/\n$//g;
-
-            #
-            # Get the repository version information.
-            #
-            $version_url = "$site_inc_repository/valid_versions.txt";
-            print "Get repository site includes valid version file $version_url\n" if $debug;
-            ($url, $resp) = Crawler_Get_HTTP_Response($version_url, "");
-
-            #
-            # Did we get the version file ?
-            #
-            if ( defined($resp) && $resp->is_success ) {
-                #
-                # Get the repository site includes valid versions
-                #
-                $repository_versions = $resp->content;
-
-                #
-                # Check to see if this site's version is in the
-                # list of valid versions.
-                #
-                $valid_version = 0;
-                foreach $version_string (split(/\n/, $repository_versions)) {
-                    if ( $local_version eq $version_string ) {
-                        print "Found valid version $version_string\n" if $debug;
-                        $valid_version = 1;
-                        last;
-                   }
-                }
-
-                #
-                # Did we find a valid version ?
-                #
-                if ( ! $valid_version ) {
-                    print "Invalid site includes version $local_version, valid versions = $repository_versions\n" if $debug;
-                    Record_Result("TP_PW_SITE", -1, -1, "",
-                                  String_Value("Invalid site includes version") . 
-                                  " \"$local_version\" " .
-                                  String_Value("expecting one of") .
-                                  " \"$repository_versions\"");
-                }
-            }
-        }
-        else {
-            #
-            # Failed to get version file
-            #
-            Record_Result("TP_PW_SITE", -1, -1, "",
-                          String_Value("Site includes file not found") .
-                                          " \"$version_url\" ");
-        }
-
-        #
-        # Completed site includes version check for this domain.
-        #
-        $site_inc_version{$domain} = 1;
     }
 }
 
@@ -5898,13 +5764,6 @@ sub Check_Site_Includes_Links {
             }
         }
     }
-
-    #
-    # Verify the site includes version.
-    #
-    Verify_Site_Includes_Version($site_inc_domain,
-                                 $template_directory_parent,
-                                 $site_inc_subdirectory, $profile);
 }
 
 #***********************************************************************

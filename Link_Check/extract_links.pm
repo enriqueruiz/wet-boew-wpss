@@ -2481,9 +2481,9 @@ return 1;
 #
 # Name: extract_links.pm	
 #
-# $Revision: 6712 $
+# $Revision: 6941 $
 # $URL: svn://10.36.20.226/trunk/Web_Checks/Link_Check/Tools/extract_links.pm $
-# $Date: 2014-07-22 12:20:01 -0400 (Tue, 22 Jul 2014) $
+# $Date: 2014-12-23 11:06:22 -0500 (Tue, 23 Dec 2014) $
 #
 # Description:
 #
@@ -2751,8 +2751,7 @@ sub Clean_Text {
     # Convert return into a space.
     #
     $text =~ s/\&nbsp;/ /g;
-    $text =~ s/\n/ /g;
-    $text =~ s/\r/ /g;
+    $text =~ s/\r\n|\r|\n/ /g;
 
     #
     # Convert multiple spaces into a single space
@@ -5375,13 +5374,21 @@ sub Extract_Links {
         # Is this PDF content ?
         #
         elsif ( $mime_type =~ /application\/pdf/ ) {
-            @links = PDF_Extract_Links($url, $base, $lang, $content);
+            #
+            # Skip PDF link extraction.  The program used to extract links
+            # from PDF files can fail if the PDF contains only scanned
+            # pages (i.e. not text).  The failure may stop the program
+            # when running on Windows when the OS presents a popup
+            # window.
+            #
+            #@links = PDF_Extract_Links($url, $base, $lang, $content);
         }
         #
         # Is the file XML ? or does the URL end in a .xml ?
         #
-        elsif ( ($mime_type =~ /application\/xhtml\+xml/) ||
-                ($mime_type =~ /application\/atom\+xml/) ||
+        elsif ( ($mime_type =~ /application\/atom\+xml/) ||
+                ($mime_type =~ /application\/ttml\+xml/) ||
+                ($mime_type =~ /application\/xhtml\+xml/) ||
                 ($mime_type =~ /application\/xml/) ||
                 ($mime_type =~ /text\/xml/) ||
                 ($url =~ /\.xml$/i) ) {

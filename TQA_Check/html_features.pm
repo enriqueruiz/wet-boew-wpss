@@ -1122,9 +1122,9 @@ return 1;
 #
 # Name:   html_features.pm
 #
-# $Revision: 6717 $
+# $Revision: 6741 $
 # $URL: svn://10.36.20.226/trunk/Web_Checks/TQA_Check/Tools/html_features.pm $
-# $Date: 2014-07-22 12:33:59 -0400 (Tue, 22 Jul 2014) $
+# $Date: 2014-07-25 14:55:37 -0400 (Fri, 25 Jul 2014) $
 #
 # Description:
 #
@@ -1204,11 +1204,10 @@ BEGIN {
 
 my ($debug) = 0;
 my (@paths, $this_path, $program_dir, $program_name, $paths);
-my (@content_lines, $html_features);
 my (%html_feature_line_no, %html_feature_column_no, %html_feature_count);
 my ($current_html_feature_profile, %html_feature_profile_map);
 my (%html_feature_metadata_profile_map, $script_tag_type, $have_text_handler);
-my ($content_section_handler);
+my ($content_section_handler, $html_features);
 
 #
 # Mime types for multimedia
@@ -1723,12 +1722,6 @@ sub HTML_Feature_Check {
     # Did we get any content ?
     #
     if ( length($$content) > 0 ) {
-
-        #
-        # Split the content into lines
-        #
-        @content_lines = split( /\n/, $$content );
-
         #
         # Create a document parser
         #

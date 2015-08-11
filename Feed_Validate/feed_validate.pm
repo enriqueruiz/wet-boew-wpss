@@ -451,9 +451,9 @@ return 1;
 #
 # Name:   feed_validate.pm
 #
-# $Revision: 6708 $
+# $Revision: 6911 $
 # $URL: svn://10.36.20.226/trunk/Web_Checks/Feed_Validate/Tools/feed_validate.pm $
-# $Date: 2014-07-22 12:18:10 -0400 (Tue, 22 Jul 2014) $
+# $Date: 2014-12-15 16:11:46 -0500 (Mon, 15 Dec 2014) $
 #
 # Description:
 #
@@ -616,8 +616,8 @@ sub Run_Web_Feed_Validator {
     }
     else {
         $status = $INVALID_FEED;
-        $result_object = tqa_result_object->new("FEED_VALIDATION",
-                                                1, "FEED_VALIDATION",
+        $result_object = tqa_result_object->new("XML_VALIDATION",
+                                                1, "XML_VALIDATION",
                                                 -1, -1, "",
                                                 $validator_output,
                                                 $this_url);
@@ -718,7 +718,7 @@ sub Start_Handler {
 # Name: Feed_Validate_Is_Web_Feed
 #
 # Parameters: this_url - a URL
-#             content - content
+#             content - content pointer
 #
 # Description:
 #
@@ -750,7 +750,7 @@ sub Feed_Validate_Is_Web_Feed {
     #
     # Parse the content.
     #
-    $eval_output = eval { $parser->parse($content); } ;
+    $eval_output = eval { $parser->parse($$content); } ;
 
     #
     # Did we find an RSS or atom feed type ?
