@@ -6818,9 +6818,9 @@ return 1;
 #
 # Name:   swu_check.pm
 #
-# $Revision: 7052 $
+# $Revision: 7339 $
 # $URL: svn://10.36.21.45/trunk/Web_Checks/CLF_Check/Tools/swu_check.pm $
-# $Date: 2015-04-02 11:12:04 -0400 (Thu, 02 Apr 2015) $
+# $Date: 2015-11-05 06:48:13 -0500 (Thu, 05 Nov 2015) $
 #
 # Description:
 #
@@ -8893,6 +8893,12 @@ sub Destroy_Text_Handler {
                 #
                 print "Not adding <a> text to <label> text handler\n" if $debug;
             }
+            elsif ( $tag eq "script" ) {
+                #
+                # Don't add script tag text parent.
+                #
+                print "Not adding <script> text to text handler\n" if $debug;
+            }
             else {
                 #
                 # Add text from this tag to the previous tag's text handler
@@ -9825,6 +9831,54 @@ sub End_Li_Tag_Handler {
 
 #***********************************************************************
 #
+# Name: Script_Tag_Handler
+#
+# Parameters: self - reference to this parser
+#             line - line number
+#             column - column number
+#             text - text from tag
+#             attr - hash table of attributes
+#
+# Description:
+#
+#   This function handles the script tag.
+#
+#***********************************************************************
+sub Script_Tag_Handler {
+    my ( $self, $line, $column, $text, %attr ) = @_;
+
+    #
+    # Start a text handler for the <script> text
+    #
+    Start_Text_Handler($self, "script");
+}
+
+#***********************************************************************
+#
+# Name: End_Script_Tag_Handler
+#
+# Parameters: self - reference to this parser
+#             line - line number
+#             column - column number
+#             text - text from tag
+#             attr - hash table of attributes
+#
+# Description:
+#
+#   This function handles the end script tag.
+#
+#***********************************************************************
+sub End_Script_Tag_Handler {
+    my ( $self, $line, $column, $text, %attr ) = @_;
+
+    #
+    # Destroy a text handler for the <script> text
+    #
+    Destroy_Text_Handler($self, "script");
+}
+
+#***********************************************************************
+#
 # Name: Anchor_Tag_Handler
 #
 # Parameters: self - reference to this parser
@@ -10182,25 +10236,31 @@ sub Start_Handler {
     # Check input tag
     #
     elsif ( $tagname eq "input" ) {
-        Input_Tag_Handler( $self, $line, $column, $text, %attr_hash );
+        Input_Tag_Handler($self, $line, $column, $text, %attr_hash);
     }
     #
     # Check li tag
     #
     elsif ( $tagname eq "li" ) {
-        Li_Tag_Handler( $self, $line, $column, $text, %attr_hash );
+        Li_Tag_Handler($self, $line, $column, $text, %attr_hash);
     }
     #
     # Check link tag
     #
     elsif ( $tagname eq "link" ) {
-        Link_Tag_Handler($line, $column, $text, %attr_hash );
+        Link_Tag_Handler($line, $column, $text, %attr_hash);
     }
     #
     # Check for meta tag
     #
     elsif ( $tagname eq "meta" ) {
-        Meta_Tag_Handler( $line, $column, $text, %attr_hash );
+        Meta_Tag_Handler($line, $column, $text, %attr_hash);
+    }
+    #
+    # Check for script tag
+    #
+    elsif ( $tagname eq "script" ) {
+        Script_Tag_Handler($self, $line, $column, $text, %attr_hash);
     }
 
 }
@@ -10328,6 +10388,12 @@ sub End_Handler {
     #
     elsif ( $tagname eq "li" ) {
         End_Li_Tag_Handler( $self, $line, $column, $text, %attr_hash );
+    }
+    #
+    # Check script tag
+    #
+    elsif ( $tagname eq "script" ) {
+        End_Script_Tag_Handler( $self, $line, $column, $text, %attr_hash );
     }
 
     #
@@ -13479,7 +13545,7 @@ sub Check_Skip_Links {
 sub Get_WET_Version {
     my ($url) = @_;
 
-    my ($version, $resp_url, $resp, $line, $lead, $tail, $content);
+    my ($version, $resp_url, $resp, $line, $lead, $tail, $content, $date);
 
     #
     # Do we already have the version number ?
@@ -13503,9 +13569,24 @@ sub Get_WET_Version {
             $content = Crawler_Decode_Content($resp);
             foreach $line (split(/\n/, $content)) {
                 #
+                # Look for Version: v... Build line
+                #
+                ($lead, $version) = $line =~ /^([\s\*]*)Version:\s+v(\S+)\s+Build.*$/io;
+
+                if ( defined($version) ) {
+                    print "Found Version: ... Build $version\n" if $debug;
+                }
+
+                #
                 # Look for Version: ... Build line
                 #
-                ($lead, $version) = $line =~ /^([\s\*]*)Version:\s+(\S+)\s+Build.*$/io;
+                if ( ! defined($version) ) {
+                    ($lead, $version) = $line =~ /^([\s\*]*)Version:\s+(\S+)\s+Build.*$/io;
+
+                    if ( defined($version) ) {
+                        print "Found Version: ... Build $version\n" if $debug;
+                    }
+                }
 
                 #
                 # If we didn't find a version, look for Version: ...
@@ -13513,14 +13594,34 @@ sub Get_WET_Version {
                 #
                 if ( ! defined($version) ) {
                     ($lead, $version) = $line =~ /^([\s\*]*)Version:\s+(\S+)\s*$/io;
+
+                    if ( defined($version) ) {
+                        print "Found Version: $version\n" if $debug;
+                    }
                 }
 
                 #
-                # If we didn't find a version, look for v?.?
-                # (i.e. v<digit>.<digit>)
+                # If we didn't find a version, look for * vn.n.n - yyyy-mm-dd
+                # (i.e. WET 4 string)
                 #
                 if ( ! defined($version) ) {
-                    ($lead, $version) = $line =~ /^([\s\*]*)v([\d\.]*).*$/io;
+                    ($lead, $version, $date) = $line =~ /^([\s\*]*)v(\d+\.\d+\.\d+)\s+\-\s+(\d+\-\d+\-\d+)\s*$/io;
+
+                    if ( defined($version) ) {
+                        print "Found vversion date: $version\n" if $debug;
+                    }
+                }
+
+                #
+                # If we didn't find a version, look for * n.n.n - yyyy-mm-dd
+                # (i.e. WET 4 string)
+                #
+                if ( ! defined($version) ) {
+                    ($lead, $version, $date) = $line =~ /^([\s\*]*)(\d+\.\d+\.\d+)\s+\-\s+(\d+\-\d+\-\d+)\s*$/io;
+
+                    if ( defined($version) ) {
+                        print "Found version date: $version\n" if $debug;
+                    }
                 }
 
                 #

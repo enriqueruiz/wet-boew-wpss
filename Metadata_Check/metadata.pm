@@ -2431,9 +2431,9 @@ return 1;
 #
 # Name:   metadata.pm
 #
-# $Revision: 6819 $
-# $URL: svn://10.36.20.226/trunk/Web_Checks/Metadata_Check/Tools/metadata.pm $
-# $Date: 2014-10-31 10:32:43 -0400 (Fri, 31 Oct 2014) $
+# $Revision: 7349 $
+# $URL: svn://10.36.21.45/trunk/Web_Checks/Metadata_Check/Tools/metadata.pm $
+# $Date: 2015-11-17 04:36:35 -0500 (Tue, 17 Nov 2015) $
 #
 # Description:
 #
@@ -2714,6 +2714,7 @@ sub Read_Compressed_Metadata_Thesaurus_File {
         return;
     }
     open(THESAURUS, $filename) || die "Error: Failed to open thesaurus file $filename\n";
+    binmode THESAURUS;
 
     #
     # Read the file, ignore blank lines and comment lines.
@@ -2731,11 +2732,13 @@ sub Read_Compressed_Metadata_Thesaurus_File {
         #
         chomp($term);
         $term =~ s/\r//g;
+        $term = encode_entities($term);
 
         #
         # Save the thersaurus term
         #
         $terms{lc($term)} = lc($term);
+        print "Save DC_Subject term \"$term\" as \"" . lc($term) . "\"\n" if $debug;
     }
     close(THESAURUS);
 
@@ -2782,6 +2785,7 @@ sub Read_Metadata_Thesaurus_File {
         return;
     }
     open(THESAURUS, $filename) || die "Error: Failed to open thesaurus file $filename\n";
+    binmode THESAURUS;
 
     #
     # Read the file, ignore blank lines and comment lines.
@@ -2814,6 +2818,7 @@ sub Read_Metadata_Thesaurus_File {
         $term = $fields[0];
         $term =~ s/"//g;
         $term =~ s/;*$//g;
+        $term = encode_entities($term);
         $term = lc($term);
 
         #
@@ -3403,15 +3408,15 @@ sub Check_Email_Address_Format {
 sub DC_Subject_Content_Check {
     my ($language, $scheme, $content) = @_;
 
-    my ($term, $thesaurus, @terms, $orig_term, $invalid_term_list);
+    my ($term, $alt_term, $thesaurus, @terms, $orig_term, $invalid_term_list);
     my ($status) = $metadata_success;
     my ($message) = "";
 
     #
-    # Do er have a scheme attribute for the dc.subject metadata tag ?
+    # Do we have a scheme attribute for the dc.subject metadata tag ?
     #
     if ( ! defined($scheme) ) {
-        print "No schema for dc.subject\n" if $debug;
+        print "No schema for $scheme\n" if $debug;
         return($status, $message);
     }
 
@@ -3449,17 +3454,27 @@ sub DC_Subject_Content_Check {
         # Eliminate whitespace and convert to lowercase
         #
         $orig_term = $term;
-        $term = encode("iso-8859-1", $term);
         $term =~ s/^\s+//g;
         $term =~ s/\s+$//g;
+        $term =~ s/’/'/g;
         $term = lc($term);
+        $term = encode_entities($term);
+        
+        #
+        # Convert windows right single quote character (’) into a regular
+        # single quote (').  The regular single quote appears in the
+        # downloadable CSV file rather than the windows character.
+        #
+        $alt_term = $term;
+        $alt_term =~ s/&rsquo;/&#39;/g;
 
         #
         # Is this term in the thesaurus ?
         #
-        if ( ! defined($$thesaurus{$term}) ) {
+        if ( (! defined($$thesaurus{$term})) &&
+             (! defined($$thesaurus{$alt_term})) ) {
             $status = $metadata_error;
-            print "Invalid term, $term, in dc.subject\n" if $debug;
+            print "Invalid term, \"$orig_term\" looking for \"$term\" or \"$alt_term\", in dc.subject\n" if $debug;
 
             #
             # Add invalid term to messages string
@@ -4315,12 +4330,17 @@ sub Meta_Tag_Handler {
                     #
                     ($status, $message) = DC_Language_Content_Check($language, $lang, $name, $content);
                 }
-                elsif ( ($status == $metadata_success) && 
-                        (($name eq "dc.subject") || ($name eq "determs.subject")) ) {
+                elsif ( ($status == $metadata_success) && ($name eq "dc.subject") ) {
                     #
                     # dc.subject metadata tag.
                     #
                     ($status, $message) = DC_Subject_Content_Check($lang, $attr{"scheme"}, $content);
+                }
+                elsif ( ($status == $metadata_success) && ($name eq "dcterms.subject") ) {
+                    #
+                    # dcterms.subject metadata tag.
+                    #
+                    ($status, $message) = DC_Subject_Content_Check($lang, $attr{"title"}, $content);
                 }
                 elsif ( ($status == $metadata_success) &&
                         ($name eq "dcterms.issued") ) {

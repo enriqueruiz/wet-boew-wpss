@@ -1,23 +1,22 @@
 #***********************************************************************
 #
-# Name:   open_data_json.pm
+# Name:   mobile_check_css.pm
 #
-# $Revision: 7174 $
-# $URL: svn://10.36.21.45/trunk/Web_Checks/Open_Data/Tools/open_data_json.pm $
-# $Date: 2015-06-05 10:51:57 -0400 (Fri, 05 Jun 2015) $
+# $Revision$
+# $URL$
+# $Date$
 #
 # Description:
 #
-#   This file contains routines that parse JSON APIs and data files to
-# check for a number of open data check points.
+#   This file contains routines that parse CSS files and check for
+# a number of mobile optimization checkpoints.
 #
 # Public functions:
-#     Set_Open_Data_JSON_Language
-#     Set_Open_Data_JSON_Debug
-#     Set_Open_Data_JSON_Testcase_Data
-#     Set_Open_Data_JSON_Test_Profile
-#     Open_Data_JSON_Check_API
-#     Open_Data_JSON_Check_Data
+#     Set_Mobile_Check_CSS_Language
+#     Set_Mobile_Check_CSS_Debug
+#     Set_Mobile_Check_CSS_Testcase_Data
+#     Set_Mobile_Check_CSS_Test_Profile
+#     Mobile_Check_CSS
 #
 # Terms and Conditions of Use
 #
@@ -49,12 +48,10 @@
 #
 #***********************************************************************
 
-package open_data_json;
+package mobile_check_css;
 
 use strict;
-use URI::URL;
 use File::Basename;
-use JSON;
 
 #***********************************************************************
 #
@@ -66,12 +63,11 @@ BEGIN {
     use vars qw($VERSION @ISA @EXPORT);
 
     @ISA     = qw(Exporter);
-    @EXPORT  = qw(Set_Open_Data_JSON_Language
-                  Set_Open_Data_JSON_Debug
-                  Set_Open_Data_JSON_Testcase_Data
-                  Set_Open_Data_JSON_Test_Profile
-                  Open_Data_JSON_Check_API
-                  Open_Data_JSON_Check_Data
+    @EXPORT  = qw(Set_Mobile_Check_CSS_Language
+                  Set_Mobile_Check_CSS_Debug
+                  Set_Mobile_Check_CSS_Testcase_Data
+                  Set_Mobile_Check_CSS_Test_Profile
+                  Mobile_Check_CSS
                   );
     $VERSION = "1.0";
 }
@@ -83,31 +79,33 @@ BEGIN {
 #***********************************************************************
 
 my ($debug) = 0;
-my (%testcase_data, $results_list_addr);
 my (@paths, $this_path, $program_dir, $program_name, $paths);
-my (%open_data_profile_map, $current_open_data_profile, $current_url);
-my ($tag_count);
 
-my ($max_error_message_string)= 2048;
+my (%testcase_data, %mobile_check_profile_map, $current_mobile_check_profile);
+my ($results_list_addr, $current_url);
+my ($max_comment_percentage, $max_whitespace_percentage);
 
 #
 # Status values
 #
+my ($check_pass)       = 0;
 my ($check_fail)       = 1;
 
 #
 # String table for error strings.
 #
 my %string_table_en = (
-    "Fails validation",            "Fails validation",
-    "No content in API",           "No content in API",
-    "No content in file",          "No content in file",
+    "Comment percentage",            "Comment percentage",
+    "exceeds maximum acceptable value", "exceeds maximum acceptable value",
+    "Whitespace percentage",         "Whitespace percentage",
+    "\@import found in CSS",         "\@import found in CSS",
     );
 
 my %string_table_fr = (
-    "Fails validation",            "Échoue la validation",
-    "No content in API",           "Aucun contenu dans API",
-    "No content in file",          "Aucun contenu dans fichier",
+    "Comment percentage",            "Pourcentage de commentaires de code",
+    "exceeds maximum acceptable value", "dépasse la valeur maximale acceptable",
+    "Whitespace percentage",         "Pourcentage de caractères d'espacement",
+    "\@import found in CSS",         "\@import trouvé en CSS",
     );
 
 #
@@ -117,7 +115,7 @@ my ($string_table) = \%string_table_en;
 
 #***********************************************************************
 #
-# Name: Set_Open_Data_JSON_Debug
+# Name: Set_Mobile_Check_CSS_Debug
 #
 # Parameters: this_debug - debug flag
 #
@@ -126,7 +124,7 @@ my ($string_table) = \%string_table_en;
 #   This function sets the package global debug flag.
 #
 #***********************************************************************
-sub Set_Open_Data_JSON_Debug {
+sub Set_Mobile_Check_CSS_Debug {
     my ($this_debug) = @_;
 
     #
@@ -137,7 +135,7 @@ sub Set_Open_Data_JSON_Debug {
 
 #**********************************************************************
 #
-# Name: Set_Open_Data_JSON_Language
+# Name: Set_Mobile_Check_CSS_Language
 #
 # Parameters: language
 #
@@ -147,7 +145,7 @@ sub Set_Open_Data_JSON_Debug {
 # by this module.
 #
 #***********************************************************************
-sub Set_Open_Data_JSON_Language {
+sub Set_Mobile_Check_CSS_Language {
     my ($language) = @_;
 
     #
@@ -162,6 +160,107 @@ sub Set_Open_Data_JSON_Language {
         #
         $string_table = \%string_table_en;
     }
+    
+    #
+    # Set language in supporting modules
+    #
+    Mobile_Testcase_Language($language);
+}
+
+#***********************************************************************
+#
+# Name: Set_Mobile_Check_CSS_Testcase_Data
+#
+# Parameters: profile - testcase profile
+#             testcase - testcase identifier
+#             data - string of data
+#
+# Description:
+#
+#   This function copies the passed data into a hash table
+# for the specified testcase identifier.
+#
+#***********************************************************************
+sub Set_Mobile_Check_CSS_Testcase_Data {
+    my ($profile, $testcase, $data) = @_;
+
+    my ($variable, $value);
+    
+    #
+    # Get testcase specific data
+    #
+    if ( $testcase eq "MINIFY" ) {
+        #
+        # Get markup type and value
+        #
+        ($variable, $value) = split(/\s+/, $data);
+
+        #
+        # Save maximum character counts
+        #
+        if ( defined($value) && ($variable eq "COMMENT") ) {
+            $max_comment_percentage = $value;
+        }
+        elsif ( defined($value) && ($variable eq "WHITESPACE") ) {
+            $max_whitespace_percentage = $value;
+        }
+    }
+    else {
+        #
+        # Copy the data into the table
+        #
+        $testcase_data{$testcase} = $data;
+    }
+}
+
+#***********************************************************************
+#
+# Name: Set_Mobile_Check_CSS_Test_Profile
+#
+# Parameters: profile - profile name
+#             mobile_checks - hash table of testcase name
+#
+# Description:
+#
+#   This function copies the passed table to unit global variables.
+# The hash table is indexed by testcase name.
+#
+#***********************************************************************
+sub Set_Mobile_Check_CSS_Test_Profile {
+    my ($profile, $mobile_checks ) = @_;
+
+    my (%local_mobile_checks);
+
+    #
+    # Make a local copy of the hash table as we will be storing the address
+    # of the hash.
+    #
+    print "Set_Mobile_Check_CSS_Test_Profile, profile = $profile\n" if $debug;
+    %local_mobile_checks = %$mobile_checks;
+    $mobile_check_profile_map{$profile} = \%local_mobile_checks;
+}
+
+#***********************************************************************
+#
+# Name: Initialize_Test_Results
+#
+# Parameters: profile - Mobile check test profile
+#             local_results_list_addr - address of results list.
+#
+# Description:
+#
+#   This function initializes the test case results table.
+#
+#***********************************************************************
+sub Initialize_Test_Results {
+    my ($profile, $local_results_list_addr) = @_;
+
+    #
+    # Set current hash tables
+    #
+    $current_mobile_check_profile = $mobile_check_profile_map{$profile};
+    $results_list_addr = $local_results_list_addr;
+
 }
 
 #**********************************************************************
@@ -196,77 +295,6 @@ sub String_Value {
         #
         return ("*** No string for $key ***");
     }
-}
-
-#***********************************************************************
-#
-# Name: Set_Open_Data_JSON_Testcase_Data
-#
-# Parameters: testcase - testcase identifier
-#             data - string of data
-#
-# Description:
-#
-#   This function copies the passed data into a hash table
-# for the specified testcase identifier.
-#
-#***********************************************************************
-sub Set_Open_Data_JSON_Testcase_Data {
-    my ($testcase, $data) = @_;
-
-    #
-    # Copy the data into the table
-    #
-    $testcase_data{$testcase} = $data;
-}
-
-#***********************************************************************
-#
-# Name: Set_Open_Data_JSON_Test_Profile
-#
-# Parameters: profile - open data check test profile
-#             testcase_names - hash table of testcase name
-#
-# Description:
-#
-#   This function copies the passed table to unit global variables.
-# The hash table is indexed by open data testcase name.
-#
-#***********************************************************************
-sub Set_Open_Data_JSON_Test_Profile {
-    my ($profile, $testcase_names) = @_;
-
-    my (%local_testcase_names);
-
-    #
-    # Make a local copy of the hash table as we will be storing the address
-    # of the hash.
-    #
-    print "Set_Open_Data_JSON_Test_Profile, profile = $profile\n" if $debug;
-    %local_testcase_names = %$testcase_names;
-    $open_data_profile_map{$profile} = \%local_testcase_names;
-}
-
-#***********************************************************************
-#
-# Name: Initialize_Test_Results
-#
-# Parameters: profile - open data check test profile
-#             local_results_list_addr - address of results list.
-#
-# Description:
-#
-#   This function initializes the test case results table.
-#
-#***********************************************************************
-sub Initialize_Test_Results {
-    my ($profile, $local_results_list_addr) = @_;
-
-    #
-    # Set current hash tables
-    #
-    $current_open_data_profile = $open_data_profile_map{$profile};
-    $results_list_addr = $local_results_list_addr;
 }
 
 #***********************************************************************
@@ -310,19 +338,19 @@ sub Print_Error {
 #
 #***********************************************************************
 sub Record_Result {
-    my ( $testcase, $line, $column,, $text, $error_string ) = @_;
+    my ( $testcase, $line, $column, $text, $error_string ) = @_;
 
     my ($result_object);
 
     #
     # Is this testcase included in the profile
     #
-    if ( defined($testcase) && defined($$current_open_data_profile{$testcase}) ) {
+    if ( defined($testcase) && defined($$current_mobile_check_profile{$testcase}) ) {
         #
         # Create result object and save details
         #
         $result_object = tqa_result_object->new($testcase, $check_fail,
-                                                Open_Data_Testcase_Description($testcase),
+                                                Mobile_Testcase_Description($testcase),
                                                 $line, $column, $text,
                                                 $error_string, $current_url);
         push (@$results_list_addr, $result_object);
@@ -336,199 +364,129 @@ sub Record_Result {
 
 #***********************************************************************
 #
-# Name: Open_Data_JSON_Check_API
+# Name: Check_CSS_Import
 #
 # Parameters: this_url - a URL
-#             profile - testcase profile
-#             filename - JSON content filename
+#             content - content pointer
 #
 # Description:
 #
-#   This function runs a number of open data checks on JSON API content.
+#   This function checks for @import rules in the CSS content.
 #
 #***********************************************************************
-sub Open_Data_JSON_Check_API {
-    my ( $this_url, $profile, $filename) = @_;
-
-    my (@tqa_results_list, $result_object, $testcase, $eval_output, $ref);
-    my ($content, $line);
-
-    #
-    # Do we have a valid profile ?
-    #
-    print "Open_Data_JSON_Check_API: Checking URL $this_url, profile = $profile\n" if $debug;
-    if ( ! defined($open_data_profile_map{$profile}) ) {
-        print "Open_Data_JSON_Check_API: Unknown testcase profile passed $profile\n";
-        return(@tqa_results_list);
-    }
-
-    #
-    # Save URL in global variable
-    #
-    if ( ($this_url =~ /^http/i) || ($this_url =~ /^file/i) ) {
-        $current_url = $this_url;
-    }
-    else {
-        #
-        # Doesn't look like a URL.  Could be just a block of JSON
-        # from the standalone validator which does not have a URL.
-        #
-        $current_url = "";
-    }
-
-    #
-    # Open the API content file
-    #
-    open(FH, "$filename") ||
-        die "Open_Data_JSON_Check_API: Failed to open $filename for reading\n";
-    binmode FH;
-
-    #
-    # Read the content
-    #
-    $content = "";
-    while ( $line = <FH> ) {
-        $content .= $line;
-    }
-    close(FH);
+sub Check_CSS_Import {
+    my ($this_url, $content) = @_;
+    
+    my (@lines, $line, $line_no);
     
     #
-    # Initialize the test case pass/fail table.
+    # Check for @import in the content
     #
-    Initialize_Test_Results($profile, \@tqa_results_list);
-
-    #
-    # Did we get any content ?
-    #
-    if ( length($content) == 0 ) {
-        print "No content passed to Open_Data_JSON_Check_API\n" if $debug;
-        Record_Result("OD_API_3", -1, 0, "",
-                      String_Value("No content in API"));
-    }
-    else {
-        #
-        # Parse the content.
-        #
-        if ( ! eval { $ref = decode_json($content); 1 } ) {
-            $eval_output = $@;
-            $eval_output =~ s/ at \S* line \d*\.$//g;
-            Record_Result("OD_3", -1, 0, "",
-                          String_Value("Fails validation") . " $eval_output");
+    print "Check_CSS_Import\n" if $debug;
+    @lines = split(/\n/, $$content);
+    $line_no = 0;
+    foreach $line (@lines) {
+        $line_no++;
+        
+        if ( $line =~ /\@import\s+/ ) {
+            Record_Result("CSS_LINK", $line_no, -1, $line,
+                          String_Value("\@import found in CSS"));
         }
     }
-
-    #
-    # Print testcase information
-    #
-    if ( $debug ) {
-        print "Open_Data_JSON_Check_API results\n";
-        foreach $result_object (@tqa_results_list) {
-            print "Testcase: " . $result_object->testcase;
-            print "  message  = " . $result_object->message . "\n";
-        }
-    }
-
-    #
-    # Return list of results
-    #
-    return(@tqa_results_list);
 }
 
 #***********************************************************************
 #
-# Name: Open_Data_JSON_Check_Data
+# Name: Mobile_Check_CSS
 #
 # Parameters: this_url - a URL
+#             language - URL language
 #             profile - testcase profile
-#             filename - JSON content file
-#             dictionary - address of a hash table for data dictionary
+#             mime_type - mime type of content
+#             resp - HTTP::Response object
+#             content - content pointer
 #
 # Description:
 #
-#   This function runs a number of open data checks on JSON data file content.
+#   This function runs a number of mobile QA checks the content.
 #
 #***********************************************************************
-sub Open_Data_JSON_Check_Data {
-    my ($this_url, $profile, $filename, $dictionary) = @_;
-    
-    my (@tqa_results_list, $result_object, $testcase, $eval_output, $ref);
-    my ($content, $line, $json_file);
+sub Mobile_Check_CSS {
+    my ($this_url, $language, $profile, $mime_type, $resp, $content) = @_;
+
+    my (@tqa_results_list, $result_object, $css_content, $css_char_count);
+    my ($non_comment_char_count, $non_whitespace_count, $percent);
+    my ($css_no_comment_content);
 
     #
-    # Do we have a valid profile ?
+    # Check for mobile optimization
     #
-    print "Open_Data_JSON_Check_Data Checking URL $this_url, profile = $profile\n" if $debug;
-    if ( ! defined($open_data_profile_map{$profile}) ) {
-        print "Open_Data_JSON_Check_Data Unknown testcase profile passed $profile\n";
-        return(@tqa_results_list);
-    }
-
-    #
-    # Save URL in global variable
-    #
-    if ( ($this_url =~ /^http/i) || ($this_url =~ /^file/i) ) {
-        $current_url = $this_url;
-    }
-    else {
-        #
-        # Doesn't look like a URL.  Could be just a block of JSON
-        # from the standalone validator which does not have a URL.
-        #
-        $current_url = "";
-    }
+    print "Mobile_Check_CSS\n" if $debug;
 
     #
     # Initialize the test case pass/fail table.
     #
     Initialize_Test_Results($profile, \@tqa_results_list);
+    $current_url = $this_url;
+    
+    #
+    # Remove any comments from the CSS content
+    #
+    $css_content = $$content;
+    $css_char_count = length($css_content);
+    $css_content =~ s/\/\*[^*]*\*+([^\/*][^*]*\*+)*\///g;
+    $css_no_comment_content = $css_content;
 
     #
-    # Open the JSON file for reading.
+    # Get the number of characters in the CSS content after
+    # comments have been removed
     #
-    print "Open JSON file $filename\n" if $debug;
-    open(FH, "$filename") ||
-        die "Open_Data_JSON_Check_Data Failed to open $filename for reading\n";
-    binmode FH;
-
+    $non_comment_char_count = length($css_content);
+    
     #
-    # Read the content
+    # Remove all the whitespace characters to get the count of non-whitespace
     #
-    $content = "";
-    while ( $line = <FH> ) {
-        $content .= $line;
-    }
-    close(FH);
-
+    $css_content =~ s/\s*//g;
+    $non_whitespace_count = length($css_content);
+    
     #
-    # Did we get any content ?
+    # Check to see if the content appears to be minified by checking the
+    # percentage of comments and whitespace in the content.
     #
-    if ( length($content) == 0 ) {
-        print "No content passed to Open_Data_JSON_Check_Data\n" if $debug;
-        Record_Result("OD_3", -1, 0, "", String_Value("No content in file"));
-    }
-    else {
+    print "Original size = $css_char_count, comments removed $non_comment_char_count, non-whitespace $non_whitespace_count\n" if $debug;
+    if ( $css_char_count > 500 ) {
         #
-        # Parse the content.
+        # Do comments exceed maximum percentage ?
         #
-        print " Content length = " . length($content) . "\n" if $debug;
-        if ( ! eval { $ref = decode_json($content); 1 } ) {
-            $eval_output = $@;
-            $eval_output =~ s/ at \S* line \d*\.$//g;
-            Record_Result("OD_3", -1, 0, "",
-                          String_Value("Fails validation") . " $eval_output");
+        $percent = int((($css_char_count - $non_comment_char_count) / $css_char_count) * 100);
+        if ( defined($max_comment_percentage) && ($percent > $max_comment_percentage) ) {
+            print "Greater than $max_comment_percentage % of content is comments\n" if $debug;
+            Record_Result("MINIFY", -1, -1, "",
+                          String_Value("Comment percentage") .
+                          " $percent % " .
+                          String_Value("exceeds maximum acceptable value") .
+                          " $max_comment_percentage %");
+        }
+        else {
+            #
+            # Does whitespace exceed maximum percentage ?
+            #
+            $percent = int((($non_comment_char_count - $non_whitespace_count) / $non_comment_char_count) * 100);
+            if ( defined($max_whitespace_percentage) && ($percent > $max_whitespace_percentage) ) {
+                print "Greater than $max_whitespace_percentage % of non-comment content is whitespace\n" if $debug;
+                Record_Result("MINIFY", -1, -1, "",
+                              String_Value("Whitespace percentage") .
+                              " $percent % " .
+                              String_Value("exceeds maximum acceptable value") .
+                              " $max_whitespace_percentage %");
+            }
         }
     }
-
+    
     #
-    # Print testcase information
+    # Check for possible @import statements in the CSS content
     #
-    if ( $debug ) {
-        print "Open_Data_JSON_Check_Data results\n";
-        foreach $result_object (@tqa_results_list) {
-            print "Testcase: " . $result_object->testcase;
-            print "  message  = " . $result_object->message . "\n";
-        }
-    }
+    Check_CSS_Import($this_url, \$css_no_comment_content);
 
     #
     # Return list of results
@@ -551,7 +509,7 @@ sub Open_Data_JSON_Check_Data {
 sub Import_Packages {
 
     my ($package);
-    my (@package_list) = ("tqa_result_object", "open_data_testcases");
+    my (@package_list) = ("tqa_result_object", "mobile_testcases");
 
     #
     # Import packages, we don't use a 'use' statement as these packages
