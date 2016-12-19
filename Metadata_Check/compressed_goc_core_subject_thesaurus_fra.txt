@@ -2215,7 +2215,7 @@ zoologie
 # text delimited file.  It contains only the prefered subject terms.
 # This file was generated as follows
 #    compress_thesaurus_file.pl goc_core_subject_thesaurus_fra.txt
-# at: 11:42 2015-05-19
+# at: 13:16 2016-09-19
 #
 # This file should not be modified.
 #
@@ -2311,6 +2311,7 @@ alimentation du nouveau-né
 allègement tarifaire
 allergie
 allocation
+allocation de crédits
 allocation des ressources
 allocations familiales
 almanach
@@ -2330,6 +2331,7 @@ analyse micro-économique
 analyse sectorielle
 analyse socio-économique
 analyse statistique
+analytique
 anatomie
 ancien combattant
 anglais
@@ -2489,12 +2491,15 @@ bourse d'études
 bovin
 bovin de boucherie
 bovin laitier
+braconnage
 braille
 brevet
 brise-glace
 brochure
 budget
+budget supplémentaire des dépenses
 bulletin
+bulletin d'information
 bureau commercial
 bureautique
 câblodistribution
@@ -2561,7 +2566,6 @@ charte
 charte des droits et libertés
 chasse à la baleine
 chasse au phoque
-chasse récréative
 chasse sportive
 chauffage
 chauffage solaire
@@ -2653,6 +2657,7 @@ conglomérat
 congrès
 conseil d'administration
 conseil des ministres
+conseil du trésor
 conservation
 conservation de l'eau
 conservation de l'énergie
@@ -2779,6 +2784,7 @@ détenu
 détournement de fonds
 dette
 dette nationale
+development tool [ang]
 développement
 développement communautaire
 développement culturel
@@ -2808,7 +2814,11 @@ dictionnaire de données
 différend commercial
 diffusion de l'information
 diplomatie ouverte
+directeur des finances
 directeur général des élections
+direction
+dirigeant principal de l'information
+dirigeant principal des ressources humaines
 discipline du travail
 discrimination
 discrimination raciale
@@ -2823,6 +2833,7 @@ diversification
 diversité biologique
 diversité culturelle
 diversité linguistique
+division
 divorce
 divulgation d'actes fautifs
 document d'information
@@ -2834,8 +2845,12 @@ données administratives
 données démographiques
 données du recensement
 données géographiques
+données hydrométriques en temps réel
+données hydrométriques historiques
 données lisibles par machine
 données météorologiques
+données numériques d'élévation
+données ouvertes
 données socio-économiques
 dossier
 dossier médical
@@ -2957,6 +2972,7 @@ encyclopédie
 Énergie solaire
 enfance
 enfant
+enfant en famille d'accueil
 engrais
 Énoncé de mission
 enquête
@@ -3057,6 +3073,7 @@ euthanasie
 Événement culturel
 Événement sportif
 Évitement fiscal
+examen
 examen des politiques
 exclusion
 expédition
@@ -3085,8 +3102,10 @@ faillite
 faim
 falsification
 famille
+famille d'accueil
 famille monoparentale
 famine
+fardeau administratif
 faune
 faune aquatique
 fauteuil roulant
@@ -3106,7 +3125,9 @@ flore
 fluorure
 flux transfrontière de données
 foire agricole
+foire aux questions
 folklore
+fonction
 fonction de contrôleur
 fonction publique
 fonctionnement
@@ -3133,6 +3154,7 @@ formulaire
 fossile
 fouilles archéologiques
 fournisseur
+fournitures de bureau
 fourrure
 frais
 français
@@ -3155,7 +3177,6 @@ fusion
 futur
 galerie d'art
 gangs
-gangs de rue
 garantie
 garantie juridique
 garde côtière
@@ -3274,6 +3295,7 @@ hydroélectricité
 hydrogéologie
 hydrographie
 hydrologie
+hydrométrie
 hygiène
 hymne national
 ichtyologie
@@ -3317,7 +3339,8 @@ indicateur économique
 indicateur environnemental
 indicateur social
 indice des prix
-indien non-inscrit
+indien inscrit
+indien non inscrit
 indiens
 industrie
 industrie agro-alimentaire
@@ -3371,6 +3394,7 @@ industrie vinicole
 inégalité
 inflation
 information
+information électronique
 information gouvernementale
 information numérisée
 information scientifique
@@ -3403,6 +3427,7 @@ institution culturelle
 institution fédérale
 institution financière
 institution provinciale
+instrument de politique
 intégration
 intelligence artificielle
 interdiction
@@ -3506,6 +3531,7 @@ maladie professionnelle
 maladie respiratoire
 maladie transmise sexuellement
 mammifère
+management tool [ang]
 mandat
 mandat de perquisition
 manuel
@@ -3556,6 +3582,7 @@ mesure de sécurité
 métadonnées
 métal
 métal précieux
+métamorphisme
 météorologie
 méthadone
 méthodologie
@@ -3574,7 +3601,9 @@ milieu rural
 milieu urbain
 mine terrestre
 minerai
+ministère
 ministère du gouvernement fédéral
+ministère gouvernemental
 ministre
 minorité
 minorité ethnique
@@ -3584,6 +3613,7 @@ mission diplomatique
 mobilité de la main-d'œuvre
 mode de vie
 modèle
+modèles
 modélisation
 modernisation
 mollusque
@@ -3626,6 +3656,7 @@ norme
 norme de qualité
 norme de sécurité
 norme relative à l'environnement
+normes comptables
 normes du travail
 nouveau-né
 numératie
@@ -3635,6 +3666,7 @@ numéro d'entreprise
 numismatique
 obésité
 objectif
+obligation d'adaptation
 obligation fiduciaire
 obligation légale
 obligations
@@ -3672,6 +3704,9 @@ orientation professionnelle
 orientation scolaire
 orientation sexuelle
 ornithologie
+outil
+outil de développement
+outil de gestion
 outillage
 ozone
 paiement de transfert
@@ -3679,6 +3714,7 @@ paiement étranger
 paix
 paléobotanique
 paléontologie
+papeterie
 papillon
 parasite
 parc
@@ -3751,15 +3787,18 @@ photographie aérienne
 physiologie
 physique
 pièce de monnaie
+piégeage
 pilotage
 pionnier
 pipeline
 pisciculture
 piste cyclable
 piste de ski
+placement en famille d'accueil
 placement initial
 plainte
 plan d'affaires
+plan gouvernemental
 plancher
 planétarium
 planification
@@ -3822,12 +3861,14 @@ porc
 pornographie
 port
 port de plaisance
+portefeuille
 possibilité d'affaires
 possibilité d'emploi
 poterie
 pourvoirie
 précipitations
 premier ministre
+présentation
 préservation des sols
 prestation au survivant
 prestation de maternité
@@ -3858,6 +3899,7 @@ prévisions météorologiques
 primate
 prime
 prime de risque
+priorité gouvernementale
 prise de décision
 privatisation
 prix
@@ -3890,6 +3932,7 @@ produit médical
 produit national brut
 profession
 professionnel de la santé
+profil
 profil statistique
 programmation
 programmation culturelle
@@ -3929,6 +3972,7 @@ prototypage
 province
 provinces atlantiques
 provinces de l'ouest
+provinces du centre
 psychologie
 publication en série
 publication gouvernementale
@@ -3961,6 +4005,7 @@ rappel de produit
 rapport
 rapport annuel
 rapport d'étape
+rapport financier trimestriel
 rapport technique
 rayonnement
 rayonnement ultraviolet
@@ -3993,6 +4038,7 @@ rédaction administrative
 rédaction des lois
 rédaction technique
 redevances
+réduction du fardeau administratif
 réforme
 réfugié
 région
@@ -4045,6 +4091,7 @@ reptile
 réseau
 réseau de télécommunications
 réseau ferroviaire
+réseau hydrométrique
 réseau informatique
 réseau routier
 réserve autochtone
@@ -4120,8 +4167,10 @@ sculpture
 sécheresse
 secours d'urgence
 secours en cas de désastre
+secrétariat du conseil du trésor
 secteur privé
 secteur public
+section
 sécurité
 sécurité aérienne
 sécurité alimentaire
@@ -4145,6 +4194,7 @@ sénat
 sénateur
 sensibilisation
 serre
+service
 service à la clientèle
 service conseil
 service d'aliénation
@@ -4169,6 +4219,7 @@ services gouvernementaux
 services immobiliers
 services informatiques
 services juridiques
+services juridiques bénévoles
 services publics
 services sociaux
 services techniques
@@ -4209,6 +4260,7 @@ sport
 sport amateur
 sport d'hiver
 stage
+station hydrométrique
 station orbitale
 stationnement
 statistiques
@@ -4288,7 +4340,6 @@ télécommunications
 télécommunications internationales
 téléconférence
 télédétection
-télégrammes
 télégraphe
 télémédecine
 téléphone
@@ -4381,6 +4432,7 @@ urgence environnementale
 utilisation
 utilisation de l'eau
 vacances
+valeurs
 valeurs mobilières
 vandalisme
 véhicule
@@ -4392,6 +4444,7 @@ vente
 vente aux enchères
 vérification
 vérification comptable
+vérification interne
 verre
 viande
 victime

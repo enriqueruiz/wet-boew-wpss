@@ -339,9 +339,9 @@ return 1;
 #
 # Name:   validate_markup.pm
 #
-# $Revision: 7357 $
+# $Revision: 7417 $
 # $URL: svn://10.36.21.45/trunk/Web_Checks/HTML_Validate/Tools/validate_markup.pm $
-# $Date: 2015-11-19 08:18:34 -0500 (Thu, 19 Nov 2015) $
+# $Date: 2015-12-24 05:45:03 -0500 (Thu, 24 Dec 2015) $
 #
 # Description:
 #
@@ -411,13 +411,10 @@ BEGIN {
 #
 #***********************************************************************
 
-my (@paths, $this_path, $program_dir, $program_name, $paths, $validate_cmnd);
+my (@paths, $this_path, $program_dir, $program_name, $paths);
 my (%markup_validate_profile_map);
 
 my ($debug) = 0;
-
-my ($VALID_MARKUP) = 1;
-my ($INVALID_MARKUP) = 0;
 
 #
 # Default language is English
@@ -447,6 +444,7 @@ sub Validate_Markup_Debug {
     # Set debug flag in supporting modules
     #
     CSS_Validate_Debug($debug);
+    EPUB_Validate_Debug($debug);
     HTML_Validate_Debug($debug);
     JavaScript_Validate_Debug($debug);
     Robots_Check_Debug($debug);
@@ -472,6 +470,7 @@ sub Validate_Markup_Language {
     # Set language for supporting packages
     #
     CSS_Validate_Language($this_language);
+    EPUB_Validate_Language($this_language);
     HTML_Validate_Language($this_language);
     Robots_Check_Language($this_language);
     Feed_Validate_Language($this_language);
@@ -479,7 +478,7 @@ sub Validate_Markup_Language {
     #
     # Set global language
     #
-    if ( $language =~ /^fr/i ) {
+    if ( $this_language =~ /^fr/i ) {
         $language = "fra";
     }
     else {
@@ -521,7 +520,7 @@ sub Set_Validate_Markup_Test_Profile {
 # Parameters: this_url - a URL
 #             profile - testcase profile
 #             mime_type - mime type of content
-#             charset - character set of content
+#             resp - HTTP::Response object
 #             content - content pointer
 #
 # Description:
@@ -531,9 +530,8 @@ sub Set_Validate_Markup_Test_Profile {
 #
 #***********************************************************************
 sub Validate_Markup {
-    my ($this_url, $profile, $mime_type, $charset, $content) = @_;
+    my ($this_url, $profile, $mime_type, $resp, $content) = @_;
 
-    my ($status) = $VALID_MARKUP;
     my (@results_list, $result_object, $other_content, @other_results_list);
     my ($testcase_profile);
 
@@ -555,13 +553,41 @@ sub Validate_Markup {
         # Select the validator that is appropriate for the content type
         #
         print "Validate_Markup URL $this_url, mime_type = $mime_type\n" if $debug;
-        if ( $mime_type =~ /text\/html/ ) {
+        if ( $mime_type =~ /text\/css/ ) {
+            #
+            # Validate the CSS content.
+            #
+            if ( defined($$testcase_profile{"CSS_VALIDATION"}) ) {
+                print "Validate CSS content\n" if $debug;
+                @results_list = CSS_Validate_Content($this_url, $content);
+            }
+        }
+        elsif ( ($mime_type =~ /application\/epub\+zip/) ||
+                ($this_url =~ /\.epub$/i) ) {
+            #
+            # Validate the EPUB content.  We do this whether or not we want the
+            # actual validation results.  A by product of the validation is
+            # to save the EPUB content in a local file for easy access to
+            # the component files.
+            #
+            print "Validate EPUB content\n" if $debug;
+            @results_list = EPUB_Validate_Content($this_url, $resp, $content);
+            
+            #
+            # Do we discard the validation results ?
+            #
+            if ( ! defined($$testcase_profile{"EPUB_VALIDATION"}) ) {
+                print "Ignore epub validation result\n" if $debug;
+                @results_list = ();
+            }
+        }
+        elsif ( $mime_type =~ /text\/html/ ) {
             #
             # Validate the HTML content.
             #
             if ( defined($$testcase_profile{"HTML_VALIDATION"}) ) {
                 print "Validate HTML content\n" if $debug;
-                @results_list = HTML_Validate_Content($this_url, $charset,
+                @results_list = HTML_Validate_Content($this_url, $resp,
                                                       $content);
              }
 
@@ -589,15 +615,6 @@ sub Validate_Markup {
                 }
             }
         }
-        elsif ( $mime_type =~ /text\/css/ ) {
-            #
-            # Validate the CSS content.
-            #
-            if ( defined($$testcase_profile{"CSS_VALIDATION"}) ) {
-                print "Validate CSS content\n" if $debug;
-                @results_list = CSS_Validate_Content($this_url, $content);
-            }
-        }
         elsif ( $this_url =~ /\/robots\.txt$/ ) {
             #
             # Validate the robots.txt content.
@@ -608,7 +625,8 @@ sub Validate_Markup {
             }
         }
         elsif ( ($mime_type =~ /application\/x-javascript/) ||
-                ($mime_type =~ /text\/javascript/) ) {
+                ($mime_type =~ /text\/javascript/) ||
+                ($this_url =~ /\.js$/i) ) {
             #
             # Validate the JavaScript content.
             #
@@ -646,7 +664,6 @@ sub Validate_Markup {
     #
     # Return result objects
     #
-    print "Validate_Markup status = $status\n" if $debug;
     return(@results_list);
 }
 
@@ -668,7 +685,7 @@ sub Import_Packages {
     my (@package_list) = ("css_validate", "html_validate",
                           "javascript_validate", "robots_check",
                           "tqa_result_object", "feed_validate",
-                          "xml_validate");
+                          "xml_validate", "epub_validate");
 
     #
     # Import packages, we don't use a 'use' statement as these packages

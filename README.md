@@ -1,6 +1,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 # WPSS Validation Tool version 4.0.1
 
 The WPSS Validation Tool provides web developers and quality assurance testers the ability to perform a number of web site and web page validation tasks at one time. The tool crawls a site to find all of the documents then analyses each document with a number of validation tools.
@@ -51,38 +52,84 @@ WPSS Validation Tool version 5.0.1
 WPSS Validation Tool version 5.2.0
 >>>>>>> upstream/master
 -----------------------------------
+=======
+Web and Open Data Validator version 6.2.0
+-----------------------------------------
+>>>>>>> upstream/master
 
-The WPSS Validation Tool provides web developers and quality assurance testers the ability to perform a number of web site and web page validation tasks at one time. The tool crawls a site to find all of the documents then analyses each document with a number of validation tools.
+The Web and Open Data Validator (formerly the WPSS Validation Tool) provides web developers and quality assurance testers the ability to perform a number of web site, web page validation and Open data validation tasks at one time.
 
-Version 5.2.0 contains the following updates and additions
+Major Changes
+----------------------
+Web Tool
 
-WPSS_Tool
+    - Change program folder and program names in Windows start menu.  Folder is "Web and Open Data Validator", 
+      tools are "Web Tool" and "Open Data Tool".
+    - Update Core Subject Thesaurus to July 4, 2016 version - DC Subject	
+    - Add a PhantomJS markup server program to remain active for an analysis run and save the delays in 
+      starting PhantomJS for each page retrieved.
+    - When merging link details from original markup and generated markup, use line/column information 
+      from the generated markup.
+
+Open Data_Tool
+
+    - Check for duplicate rows in CSV file - OD_CSV_1
+    - Check for duplicate columns in CSV file - OD_CSV_1
+    - If an XML data file contains a schema specification using the xsi:schemaLocation or 
+      xsi:noNamespaceSchemaLocation attribute, validate the XML against the schema - OD_3
+    - Check for BOM (Byte Order Mark) in all text files - OD_TP_PW_BOM
+    - If an XML data file contains a DOCTYPE declaration, validate the XML against the DOCTYPE - OD_3
+    - Generate a dataset inventory CSV file containing details of the dataset files (URL, size, mime-type, etc).
+    - Check the alternate language versions of CSV datafiles contain the same number of columns - OD_CSV_1
+
+
+Version 6.2.0 contains the following updates and additions
+
+Web
+---
+
+    - Prefix all temporary file names with WPSS_TOOL_ for easy deletion.
+    - Update Core Subject Thesaurus to July 4, 2016 version - DC Subject
+    - Move supporting programs to a bin folder from the top level folder.
+    - Add a PhantomJS markup server program to remain active for an analysis
+      run and save the delays in starting PhantomJS for each page retrieved.
+    - Change tool name to "Web and Open Data Validator" to better describe
+      the purpose of the tool.
+    - When merging link details from original markup and generated markup,
+      use line/column information from the generated markup.
+    - Change program folder and program names in Windows start menu.  Folder
+      is "Web and Open Data Validator", tools are "Web Tool" and
+      "Open Data Tool".
+
+Open Data
 ---------
 
-    - If a link has a non JavaScript onclick attribute, use that as the href value.
-    - Reset heading levels inside section tags - TP_PW_H.
-    - Update HTML5 validator to version 15.6.29.
-    - Check if the captions file mime type matches the data type attribute of the track tag - 
-      WCAG_2.0-F8
-    - Mobile optimization: Check for no content in supporting files - NUM_HTTP
-    - Mobile optimization: Check for no styles in CSS stylesheet file - NUM_HTTP
-    - When checking dc.subject values, allow values with either windows right single 
-      quote or regular single quote - Metadata Content
-    - Don't report baseline technologies error if frames are used in HTML 5 - TP_PW_TECH
-    - Add testcase group profile for Canada.ca sites using the PWGSC developed WET 4.0 
-      template package.
-    - Check for and remove any BOM from TTML files before validation.
+    - Check for duplicate rows in CSV file - OD_CSV_1
+    - Check for duplicate columns in CSV file - OD_CSV_1
+    - Remove API specific testcase identifiers
+    - If an XML data file contains a schema specification using the
+      xsi:schemaLocation or xsi:noNamespaceSchemaLocation attribute,
+      validate the XML against the schema - OD_3
+    - Use custom CSV file parser to avoid potential error in Text::CSV
+      module and quoted fields with greater than 32K characters.
+    - Check for BOM (Byte Order Mark) in all text files - OD_TP_PW_BOM
+    - If an XML data file contains a DOCTYPE declaration, validate
+      the XML against the DOCTYPE - OD_3
+    - Replace the xsd-validator tool with the Xerces tool to validate
+      XML against schema or a DOCTYPE.
+    - Check for a DOCTYPE or schema specification in XML files - OD_3
+    - Validate XML content against data patterns specified in the
+      data dictionary - OD_XML_1
+    - Update JSON open data description URL handling due to changes in
+      the open.canada.ca site.
+    - Generate a dataset inventory CSV file containing details of the
+      dataset files (URL, size, mime-type, etc).
+    - Check the alternate language versions of CSV datafiles contain the
+      same number of columns - OD_CSV_1
 
-Open Data Tool
---------------
 
-    - Decode data dictionary files if they are UTF-8 encoded to fix bug with CSV headers 
-      that have accented characters - OD_CSV_1
-    - Do case sensitive checks for dictionary terms and CSV headers - OD_CSV_1
-
-
-WPSS_Tool Installer
----------------------
+Web and Open Data Validator Installer
+-------------------------------------
 
 The tool installer, WPSS_Tool.exe, does NOT include the required Perl or Python installers (as was the case for previous releases).  Perl and Python must be installed on the workstation prior to installing the WPSS_Tool.
 
@@ -98,6 +145,7 @@ The WPSS_Tool has been tested on the following platforms
 The WPSS Tool installer is available as a release in this repository
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   - https://github.com/wet-boew/wet-boew-wpss/releases/download/4.6.0/WPSS_Tool.exe
 >>>>>>> cd924f176ead1826c0dd8e811da53b9f1ee1e583
 =======
@@ -105,4 +153,7 @@ The WPSS Tool installer is available as a release in this repository
 >>>>>>> upstream/master
 =======
   - https://github.com/wet-boew/wet-boew-wpss/releases/download/5.2.0/WPSS_Tool.exe
+>>>>>>> upstream/master
+=======
+  - https://github.com/wet-boew/wet-boew-wpss/releases/download/6.2.0/WPSS_Tool.exe
 >>>>>>> upstream/master

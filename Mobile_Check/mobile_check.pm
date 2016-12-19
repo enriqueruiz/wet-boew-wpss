@@ -2,9 +2,9 @@
 #
 # Name:   mobile_check.pm
 #
-# $Revision: 7334 $
+# $Revision: 7562 $
 # $URL: svn://10.36.21.45/trunk/Web_Checks/Mobile_Check/Tools/mobile_check.pm $
-# $Date: 2015-11-05 06:43:17 -0500 (Thu, 05 Nov 2015) $
+# $Date: 2016-04-13 04:14:45 -0400 (Wed, 13 Apr 2016) $
 #
 # Description:
 #
@@ -132,6 +132,7 @@ my %string_table_en = (
     "greater than expected maximum of", "greater than expected maximum of",
     "Hostname count for supporting files", "Hostname count for supporting files",
     "JS link found in <head>",       "JavaScript link found in <head>",
+    "JS link not near end of <body>",   "JavaScript link not near end of <body>",
     "link count",                    "link count",
     "No content in supporting file", "No content in supporting file",
     "No Etag or Last-Modified header field", "No Etag or Last-Modified header field",
@@ -156,6 +157,7 @@ my %string_table_fr = (
     "greater than expected maximum of", "plus que le maximum prévu de",
     "Hostname count for supporting files", "Nombre de nom d'hôte pour supporter les fichiers",
     "JS link found in <head>",       "lien JavaScript qui se trouve dans la balise <head>",
+    "JS link not near end of <body>",   "lien javascript pas vers la fin de la balise <body>",
     "link count",                    "nombre de liens",
     "No content in supporting file", "Aucun contenu dans le fichier de support",
     "No Etag or Last-Modified header field", "Aucune Etag ou un champ d'en-tête de Last-Modified",
@@ -759,7 +761,7 @@ sub Check_Cookies {
 sub Mobile_Check {
     my ($this_url, $language, $profile, $mime_type, $resp, $content) = @_;
 
-    my (@tqa_results_list, $result_object, @other_tqa_results_list);
+    my (@tqa_results_list, $result_object, @other_tqa_results_list, $tcid);
 
     #
     # Check for mobile optimization
@@ -887,6 +889,16 @@ sub Mobile_Check {
     #
     Check_Compressed_Content($this_url, $mime_type, $resp);
     
+    #
+    # Add help URL to result
+    #
+    foreach $result_object (@tqa_results_list) {
+        $tcid = $result_object->testcase();
+        if ( defined(Mobile_Check_Testcase_URL($tcid)) ) {
+            $result_object->help_url(Mobile_Check_Testcase_URL($tcid));
+        }
+    }
+
     #
     # Return list of results
     #
@@ -1021,7 +1033,7 @@ sub Check_Broken_Redirect_Links {
     my ($link_sets) = @_;
 
     my ($section, $list_addr, $link, $resp, $pattern, $match_pattern);
-    my (%styles, $content, $mime_type, $header, $resp_url);
+    my (%styles, $content, $mime_type, $header, $resp_url, %attr);
 
     #
     # Check links in all sections of the page
@@ -1048,7 +1060,8 @@ sub Check_Broken_Redirect_Links {
                 # Is this a broken link ?
                 #
                 if ( defined($resp) && ($resp->code == 404) ) {
-                    Record_Result("NO_404", -1, -1, $link->source_line,
+                    Record_Result("NO_404", $link->line_no,
+                                  $link->column_no, $link->source_line,
                                   String_Value("Broken link") .
                                   " \"" . $link->abs_url . "\"");
                 }
@@ -1081,7 +1094,8 @@ sub Check_Broken_Redirect_Links {
                     # Do we record this redirect ?
                     #
                     if ( ! $match_pattern ) {
-                        Record_Result("REDIRECTS", -1, -1, $link->source_line,
+                        Record_Result("REDIRECTS", $link->line_no,
+                                      $link->column_no, $link->source_line,
                                       String_Value("Redirected link") .
                                       " \"" . $link->abs_url . "\" -> \"" .
                                       $link->redirect_url . "\"");
@@ -1121,7 +1135,8 @@ sub Check_Broken_Redirect_Links {
                     # Is there any content in the supporting file
                     #
                     if ( $supporting_file_size{$link->abs_url} == 0 ) {
-                        Record_Result("NUM_HTTP", -1, -1, $link->source_line,
+                        Record_Result("NUM_HTTP", $link->line_no,
+                                      $link->column_no, $link->source_line,
                                       String_Value("No content in supporting file") .
                                       " \"" . $link->abs_url . "\"");
                     }
@@ -1133,27 +1148,35 @@ sub Check_Broken_Redirect_Links {
                          ($supporting_file_size{$link->abs_url} > 0) ) {
                          
                         #
-                        # Do we already have a style count ?
+                        # Is this a link to a stylesheet ?
                         #
-                        if ( ! defined($style_count{$link->abs_url}) ) {
-                            $header = $resp->headers;
-                            $mime_type = $header->content_type;
-                            %styles = CSS_Check_Get_Styles_From_Content($link->abs_url,
-                                                                        $content,
-                                                                        $mime_type);
-                                                                         
-                            $style_count{$link->abs_url} = scalar(keys %styles);
-                            print "Have " . $style_count{$link->abs_url} .
-                                  " styles in CSS file " . $link->abs_url . "\n" if $debug;
-                        }
-                         
-                        #
-                        # Is the style count 0 ?
-                        #
-                        if ( $style_count{$link->abs_url} == 0 ) {
-                            Record_Result("NUM_HTTP", -1, -1, $link->source_line,
-                                          String_Value("No styles in stylesheet file") .
-                                          " \"" . $link->abs_url . "\"");
+                        %attr = $link->attr;
+                        if ( defined($attr{"rel"}) &&
+                             ($attr{"rel"} eq "stylesheet") ) {
+                            #
+                            # Do we already have a style count ?
+                            #
+                            if ( ! defined($style_count{$link->abs_url}) ) {
+                                $header = $resp->headers;
+                                $mime_type = $header->content_type;
+                                %styles = CSS_Check_Get_Styles_From_Content($link->abs_url,
+                                                                            $content,
+                                                                            $mime_type);
+
+                                $style_count{$link->abs_url} = scalar(keys %styles);
+                                print "Have " . $style_count{$link->abs_url} .
+                                      " styles in CSS file " . $link->abs_url . "\n" if $debug;
+                            }
+
+                            #
+                            # Is the style count 0 ?
+                            #
+                            if ( $style_count{$link->abs_url} == 0 ) {
+                                Record_Result("NUM_HTTP", $link->line_no,
+                                              $link->column_no, $link->source_line,
+                                              String_Value("No styles in stylesheet file") .
+                                              " \"" . $link->abs_url . "\"");
+                            }
                         }
                     }
                 }
@@ -1189,12 +1212,14 @@ sub Check_CSS_Links {
         print "Check links in section $section\n" if $debug;
         foreach $link (@$list_addr) {
             #
-            # Exclude <noscript> links and links from
-            # conditional includes.
+            # Exclude <noscript> links, links from
+            # conditional includes or generated content.
             #
             print "Check link " . $link->abs_url . "\n" if $debug;
-            if ( $link->noscript || $link->modified_content ) {
-                print "Skip noscript or modified content link\n" if $debug;
+            if ( $link->noscript ||
+                 $link->modified_content ||
+                 $link->generated_content ) {
+                print "Skip noscript, modified content or generated content link\n" if $debug;
             }
             #
             # Is this link from a <link> tag ?
@@ -1211,10 +1236,8 @@ sub Check_CSS_Links {
                 if ( defined($attr{"rel"}) &&
                      ($attr{"rel"} =~ /^stylesheet$/i) ) {
                     print "Found stylesheet\n" if $debug;
-                    if ( ! defined($css_urls{$link->abs_url}) ) {
-                        $css_count++;
-                        $css_urls{$link->abs_url} = 1;
-                    }
+                    $css_count++;
+                    $css_urls{$link->abs_url} = 1;
                 }
                 
                 #
@@ -1222,8 +1245,8 @@ sub Check_CSS_Links {
                 # files outside the <head>.
                 #
                 if ( $section ne "HEAD" ) {
-                    Record_Result("CSS_TOP", $link->line_no, $link->column_no,
-                                  $link->source_line,
+                    Record_Result("CSS_TOP", $link->line_no,
+                                  $link->column_no, $link->source_line,
                                   String_Value("CSS link found outside of <head>"));
                 }
             }
@@ -1247,6 +1270,7 @@ sub Check_CSS_Links {
 #
 # Parameters: link_sets - table of lists of link objects (1 list per
 #               document section)
+#             content - content pointer
 #
 # Description:
 #
@@ -1255,9 +1279,18 @@ sub Check_CSS_Links {
 #
 #***********************************************************************
 sub Check_JS_Links {
-    my ($link_sets) = @_;
+    my ($link_sets, $content) = @_;
 
     my ($section, $list_addr, $link, $js_count, %attr, %urls, $src);
+    my ($line_no, $content_line_count, @lines);
+
+    #
+    # Get a count of the number of lines of content.  We need the count
+    # to see if <script> tags appear near the beginning or end of the
+    # web page.
+    #
+    @lines = split(/\n/, $$content);
+    $content_line_count = @lines;
 
     #
     # Check links in all sections of the page
@@ -1269,11 +1302,13 @@ sub Check_JS_Links {
         foreach $link (@$list_addr) {
             #
             # Exclude <noscript> links and links from
-            # conditional includes.
+            # conditional includes or generated content.
             #
             print "Check link " . $link->abs_url . "\n" if $debug;
-            if ( $link->noscript || $link->modified_content ) {
-                print "Skip noscript or modified content link\n" if $debug;
+            if ( $link->noscript ||
+                 $link->modified_content ||
+                 $link->generated_content ) {
+                print "Skip noscript, modified content or generated content link\n" if $debug;
             }
             #
             # Is this link from a <script> tag ?
@@ -1312,13 +1347,45 @@ sub Check_JS_Links {
                 }
 
                 #
-                # Are we inside the HEAD section ? We should not find JS
-                # files in the <head>.
+                # Does this <script> tag have a defer attribute ?
+                # (instructing the browser to load the script when the page
+                # finishes loading).
                 #
-                if ( $section eq "HEAD" ) {
-                    Record_Result("JS_BOTTOM", $link->line_no, $link->column_no,
-                                  $link->source_line,
+                if ( defined($attr{"defer"}) ) {
+                    print "Skip script tag with defer attribute\n" if $debug;
+                }
+                #
+                # Is the <script> tag inside the HEAD section ?
+                #
+                elsif ( $section eq "HEAD" ) {
+                    Record_Result("JS_BOTTOM", $link->line_no,
+                                  $link->column_no, $link->source_line,
                                   String_Value("JS link found in <head>"));
+                }
+                #
+                # Is the <script> tag near the bottom of the web page ?
+                #
+                else {
+                    $line_no = $link->line_no;
+
+                    #
+                    # Do we have at least 100 lines of content ?
+                    #
+                    if ( $content_line_count > 100 ) {
+                        #
+                        # Is the <script> tag within the last 10% of the
+                        # content ?
+                        #
+                        print "Link line number $line_no, content line count = $content_line_count\n" if $debug;
+                        if ( $line_no < (int($content_line_count * 0.90)) ) {
+                            Record_Result("JS_BOTTOM", $link->line_no,
+                                          $link->column_no, $link->source_line,
+                                          String_Value("JS link not near end of <body>"));
+                        }
+                        else {
+                            print "Skip script tag in bottom 10% of content\n" if $debug;
+                        }
+                    }
                 }
             }
         }
@@ -1362,12 +1429,14 @@ sub Check_Image_Links {
         print "Check links in section $section\n" if $debug;
         foreach $link (@$list_addr) {
             #
-            # Exclude <noscript> links and links from
-            # conditional includes.
+            # Exclude <noscript> links, links from conditional
+            # includes and generated content links.
             #
             print "Check link " . $link->abs_url . "\n" if $debug;
-            if ( $link->noscript || $link->modified_content ) {
-                print "Skip noscript or modified content link\n" if $debug;
+            if ( $link->noscript ||
+                 $link->modified_content ||
+                 $link->generated_content ) {
+                print "Skip noscript, modified content or generated content link\n" if $debug;
             }
             #
             # Is this link from a <img> tag ?
@@ -1546,6 +1615,7 @@ sub Check_Hostnames {
 #             language - URL language
 #             link_sets - table of lists of link objects (1 list per
 #               document section)
+#             content - content pointer
 #
 # Description:
 #
@@ -1554,9 +1624,10 @@ sub Check_Hostnames {
 #
 #***********************************************************************
 sub Mobile_Check_Links {
-    my ($tqa_results_list, $url, $profile, $language, $link_sets) = @_;
+    my ($tqa_results_list, $url, $profile, $language, $link_sets,
+        $content) = @_;
 
-    my ($result_object, $section, $list_addr, $link);
+    my ($result_object, $section, $list_addr, $link, $tcid);
     
     #
     # Perform Mobile link checks.
@@ -1599,7 +1670,7 @@ sub Mobile_Check_Links {
     #
     # Check the number of JS files in the page
     #
-    Check_JS_Links($link_sets);
+    Check_JS_Links($link_sets, $content);
     
     #
     # Check the number of image files in the page
@@ -1610,6 +1681,16 @@ sub Mobile_Check_Links {
     # Check the hostnames for components (CSS, JavaScript, Images, etc)
     #
     Check_Hostnames($url, $link_sets);
+
+    #
+    # Add help URL to result
+    #
+    foreach $result_object (@$tqa_results_list) {
+        $tcid = $result_object->testcase();
+        if ( defined(Mobile_Check_Testcase_URL($tcid)) ) {
+            $result_object->help_url(Mobile_Check_Testcase_URL($tcid));
+        }
+    }
 }
 
 #***********************************************************************
@@ -1656,11 +1737,13 @@ sub Mobile_Check_Compute_Page_Size {
         $links_addr = $$link_sets{$section};
         foreach $link (@$links_addr) {
             #
-            # Ignore links in modified code (IE conditional code) and
-            # in <noscript> tags.
+            # Ignore links in modified code (IE conditional code),
+            # in <noscript> tags and generated content.
             #
             $link_type = $link->link_type;
-            if ( (! $link->modified_content) && (! $link->noscript) ) {
+            if ( (! $link->modified_content) &&
+                 (! $link->noscript) &&
+                 (! $link->generated_content) ) {
                 #
                 # Check for <img> tag
                 #
@@ -1744,7 +1827,9 @@ sub Mobile_Check_Save_Web_Page_Size {
     print "Mobile_Check_Save_Web_Page_Size_Details\n" if $debug;
     if ( ! defined($file_handle) ) {
         print "Create temporary CSV file\n" if $debug;
-        ($file_handle, $file_name) = tempfile( SUFFIX => '.csv');
+        ($file_handle, $file_name) = tempfile("WPSS_TOOL_XXXXXXXXXX",
+                                              SUFFIX => '.csv',
+                                              TMPDIR => 1);
         if ( ! defined($file_handle) ) {
             print "Error: Failed to create temporary file in Mobile_Check_Save_Web_Page_Size\n";
             return;
@@ -1755,13 +1840,13 @@ sub Mobile_Check_Save_Web_Page_Size {
         #
         # Print header row for CSV file
         #
-        print $file_handle "url,size,html_size,css_count,css_size,js_count,js_size,img_count,img_size,other_count,other_size\n";
+        print $file_handle "url,size,html_size,css_count,css_size,js_count,js_size,img_count,img_size,other_count,other_size\r\n";
     }
 
     #
     # print size string to file
     #
-    print $file_handle "$url,$size_string\n";
+    print $file_handle "$url,$size_string\r\n";
 
     #
     # Return file handle and file name

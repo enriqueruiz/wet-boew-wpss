@@ -3101,9 +3101,9 @@ return 1;
 #
 # Name:   tp_pw_check.pm
 #
-# $Revision: 7347 $
+# $Revision: 7615 $
 # $URL: svn://10.36.21.45/trunk/Web_Checks/CLF_Check/Tools/tp_pw_check.pm $
-# $Date: 2015-11-17 04:33:41 -0500 (Tue, 17 Nov 2015) $
+# $Date: 2016-07-05 08:49:19 -0400 (Tue, 05 Jul 2016) $
 #
 # Description:
 #
@@ -3201,6 +3201,7 @@ my ($current_heading_level, $have_text_handler, %section_h1_count);
 my (%found_template_markers, $current_clf_check_profile_name);
 my ($valid_search_actions, $expected_search_inputs);
 my ($in_search_form, $in_noscript, @heading_level_stack);
+my ($current_anchor_mailto);
 
 my ($max_error_message_string) = 2048;
 
@@ -3236,6 +3237,7 @@ my %string_table_en = (
     "Application template used outside login, have target=_blank when not expected in navigation section",
         "Application template used outside login, have target=_blank when not expected in navigation section ",
     "Checksum failed for template file", "Checksum failed for template file",
+    "Did not find web analytics code", "Did not find web analytics code ",
     "Displayed e-mail address",       "Displayed e-mail address",
     "DOCTYPE is not",                 "DOCTYPE is not",
     "does not match mailto",          "does not match 'mailto'",
@@ -3273,6 +3275,7 @@ my %string_table_fr = (
         "Gabarit d'application utilisé en dehors connexion, avoir target = _blank lorsqu'il n'est pas prévu dans la section de navigation",
     "Application template used outside login, have target=_blank when not expected in navigation section",
     "Checksum failed for template file", "Checksum échoué pour le fichier de gabarit",
+    "Did not find web analytics code", "Ne trouvez pas le code d'analyse Web ",
     "Displayed e-mail address",       "L'adresse courriel affichée",
     "DOCTYPE is not",                 "DOCTYPE ne pas",
     "does not match mailto",          "ne correspond pas au 'mailto'",
@@ -3325,6 +3328,7 @@ my ($url_table) = \%testcase_url_en;
 # String tables for testcase ID to testcase descriptions
 #
 my (%testcase_description_en) = (
+"TP_PW_ANALYTICS", "TP_PW_ANALYTICS: PWGSC Web Analytics",
 "TP_PW_H",        "TP_PW_H: Heading structure",
 "TP_PW_MAILTO",   "TP_PW_MAILTO: Invalid e-mail address in anchor in 'mailto' link",
 "TP_PW_SITE",     "TP_PW_SITE: PWGSC site includes integrity",
@@ -3336,6 +3340,7 @@ my (%testcase_description_en) = (
 );
 
 my (%testcase_description_fr) = (
+"TP_PW_ANALYTICS", "TP_PW_ANALYTICS: Web Analytiques de TPSGC",
 "TP_PW_H",        "TP_PW_H: Structure de l'en-tête",
 "TP_PW_MAILTO",   "TP_PW_MAILTO: Adresse électronique invalide dans l'ancrage du lien 'mailto'",
 "TP_PW_SITE",     "TP_PW_SITE: L'intégrité des fichier des includes du site",
@@ -3742,6 +3747,19 @@ sub Set_TP_PW_Check_Testcase_Data {
                 $$hash{$field1} = $field2;
             }
         }
+    }
+    #
+    # Do we have TP_PW_ANALYTICS testcase specific data?
+    #
+    elsif ( $testcase eq "TP_PW_ANALYTICS" ) {
+        #
+        # Save the possible web analytics value
+        #
+        if ( ! ($object->has_field("web_analytics_links")) ) {
+            $object->add_field("web_analytics_links", "array");
+        }
+        $array = $object->get_field("web_analytics_links");
+        push(@$array, $data);
     }
 }
 
@@ -4273,10 +4291,6 @@ sub Anchor_Tag_Handler {
     # Do we have an href attribute
     #
     if ( defined( $attr{"href"} ) ) {
-        #
-        # Save the href value in a global variable.  We may need it when
-        # processing the end of the anchor tag.
-        #
         $href = $attr{"href"};
         $href =~ s/^\s*//g;
         $href =~ s/\s*$//g;
@@ -4288,10 +4302,13 @@ sub Anchor_Tag_Handler {
         if ( $href =~ /^mailto:/i ) {
 
             #
-            # Save email address portion
+            # Save email address portion value in a global variable.
             #
             $href =~ tr/A-Z/a-z/;
-            push( @{ $self->handler("text") }, $href );
+            $current_anchor_mailto = $href;
+        }
+        else {
+            $current_anchor_mailto = "";
         }
     }
 }
@@ -4746,9 +4763,9 @@ sub Check_End_Anchor_Mailto {
         if ( !$found_match ) {
             Record_Result("TP_PW_MAILTO", $line, $column, $text,
                           String_Value("Displayed e-mail address") .
-                          "  " . join("", @anchor_text_list) . " " .
+                          " \"" . join("", @anchor_text_list) . "\" " .
                           String_Value("does not match mailto") .
-                          " $mailto_address");
+                          " \"$mailto_address\"");
         }
     }
 }
@@ -4771,7 +4788,7 @@ sub Check_End_Anchor_Mailto {
 sub End_Anchor_Tag_Handler {
     my ( $self, $line, $column, $text ) = @_;
 
-    my ($this_text, @anchor_text_list);
+    my (@anchor_text_list);
 
     #
     # Get all the text & image paths found within the anchor tag
@@ -4783,21 +4800,14 @@ sub End_Anchor_Tag_Handler {
     @anchor_text_list = @{ $self->handler("text") };
 
     #
-    # Loop through the text items
+    # Do we have a mail to address ?
     #
-    foreach $this_text (@anchor_text_list) {
-
+    if ( $current_anchor_mailto ne "" ) {
         #
-        # Do we have a mailto ?
+        # Does mailto: value match display value ?
         #
-        if ( $this_text =~ /^mailto:/ ) {
-
-            #
-            # Does mailto: value match display value ?
-            #
-            Check_End_Anchor_Mailto($line, $column, $text, $this_text,
-                                    @anchor_text_list);
-        }
+        Check_End_Anchor_Mailto($line, $column, $text, $current_anchor_mailto,
+                                @anchor_text_list);
     }
 
     #
@@ -5158,7 +5168,7 @@ sub Checksum {
     #
     # Write the content to a file
     #
-    ($fh, $filename) = tempfile();
+    ($fh, $filename) = tempfile("WPSS_TOOL_XXXXXXXXXX", TMPDIR => 1);
     if ( ! defined($fh) ) {
         print "Error: Failed to create temporary file in Checksum\n";
         return($checksum);
@@ -5207,6 +5217,7 @@ sub Verify_Template_Checksums {
     my ($manifest_url, $url, $resp, $line, $checksum, $file_path);
     my ($calculated_checksum, $object, $template_directory);
     my ($object, $trusted_template_domains, @fields, $last_field);
+    my ($critical_template_file, $content);
 
     #
     # Get testcase data object
@@ -5271,16 +5282,34 @@ sub Verify_Template_Checksums {
             # The content of the manifest is expected to be 
             # <checksum> <file path>
             #
-            foreach $line (split(/\n/, $resp->content)) {
+            foreach $line (split(/\n/, Crawler_Decode_Content($resp))) {
                 #
                 # Get checksum value and file path
                 #
                 ($checksum, $file_path) = split(/\s+/, $line, 2);
+                
+                #
+                # Is this a critical file? Some template files are
+                # not critical (e.g. demo pages), so if they are not
+                # found, it is not an error.
+                #
+                @fields = split(/\./, $file_path);
+                $last_field = @fields;
+                if ( ($last_field > 0) &&
+                     ( ! defined($critical_template_file_suffix{lc($fields[$last_field - 1])})) ) {
+                    #
+                    # Ignore error on non-critical file
+                    #
+                    print "Non-critical template file, $file_path\n" if $debug;
+                    next;
+                }
 
                 #
-                # See if we can get the file path from the server
+                # See if we can get the file path from the server.
+                # Get all critical files and those with an expected checksum
+                # value (i.e. non zero checksum).
                 #
-                if ( defined($file_path) ) {
+                if ( defined($file_path) && ($checksum ne "0") ) {
                     $url = $domain . "/$template_directory_parent$file_path";
                     print "Get template file $url\n" if $debug;
                     ($url, $resp) = Crawler_Get_HTTP_Response($url,"");
@@ -5295,7 +5324,8 @@ sub Verify_Template_Checksums {
                         # file should not be checksumed, e.g. an HTML file)
                         #
                         if ( $checksum ne "0" ) {
-                            $calculated_checksum = Checksum(Crawler_Decode_Content($resp));
+                            $content = Crawler_Decode_Content($resp);
+                            $calculated_checksum = Checksum($content);
                         }
                         else {
                             $calculated_checksum = "0";
@@ -5306,35 +5336,25 @@ sub Verify_Template_Checksums {
                         #
                         if ( $calculated_checksum ne $checksum ) {
                             print "Checksum values differ, $checksum != $calculated_checksum\n" if $debug;
-                            Record_Result("TP_PW_TEMPLATE", -1, -1, "",
-                           String_Value("Checksum failed for template file") .
-                                                          " \"$url\" ");
+                            
+                            #
+                            # Don't record checksum fails.  Some web server
+                            # configurations appear to deliver different content
+                            # than what is expected, which results in a
+                            # checksum mismatch.
+                            #
+                            #Record_Result("TP_PW_TEMPLATE", -1, -1, "",
+                            #              String_Value("Checksum failed for template file") .
+                            #                           " \"$url\" ");
                         }
                     }
                     else {
                         #
                         # Failed to get template file.
-                        # Is the file suffix one of the critical types ?
-                        # Some web servers may not be configured to serve up
-                        # files with an unusual suffix (e.g. .old).
                         #
-                        @fields = split(/\./, $file_path);
-                        $last_field = @fields;
-                        if ( ($last_field > 0) && 
-                             ( ! defined($critical_template_file_suffix{lc($fields[$last_field - 1])})) ) {
-                            #
-                            # Ignore error on non-critical file
-                            #
-                            print "Non-critical template file not found, $url\n" if $debug;
-                        }
-                        else {
-                            #
-                            # Missing template file
-                            #
-                            Record_Result("TP_PW_TEMPLATE", -1, -1, "",
-                                          String_Value("Template file not found") .
-                                                          " \"$url\" ");
-                        }
+                        Record_Result("TP_PW_TEMPLATE", -1, -1, "",
+                                      String_Value("Template file not found") .
+                                                      " \"$url\" ");
                     }
                 }
             }
@@ -5453,6 +5473,7 @@ sub Verify_Template_Version {
             $local_version =~ s/\n$//g;
             if ( length($local_version) > 100 ) {
                  $local_version = substr($local_version, 0, 100);
+                 eval { $local_version =~ s/[^[:ascii:]]+//g; };
             }
 
             #
@@ -6051,6 +6072,116 @@ sub Check_Application_Template_Navigation {
 
 #***********************************************************************
 #
+# Name: Check_Web_Analytics_Link
+#
+# Parameters: url - URL
+#             link_sets - table of lists of link objects (1 list per
+#               document section)
+#             logged_in - flag to indicate if we are logged into an
+#               application
+#             profile - testcase profile
+#
+# Description:
+#
+# This function checks for the presence of Web Analytics links
+# (e.g. link to piwik.php).
+#
+#***********************************************************************
+sub Check_Web_Analytics_Link {
+    my ($url, $link_sets, $logged_in, $profile) = @_;
+
+    my ($section, $list_addr, $link, $link_url, $pattern, $analytics_patterns);
+    my ($object, $pattern_list);
+    my ($found_analytics_link) = 0;
+
+    #
+    # Are we logged in ? If so, skip check for analytics link as it is
+    # unlikely to be included on web pages behind a login.
+    #
+    if ( $logged_in ) {
+        print "Skip Check_Web_Analytics_Link behind login\n" if $debug;
+        return;
+    }
+    #
+    # Get web analytics patterns value
+    #
+    print "Check_Web_Analytics_Link\n" if $debug;
+    $object = $testcase_data_objects{$profile};
+    if ( defined($object) ) {
+        $analytics_patterns = $object->get_field("web_analytics_links");
+        
+        #
+        # Do we have any patterns ?
+        #
+        if ( defined($analytics_patterns) ) {
+            $pattern_list = join(", ", @$analytics_patterns);
+        }
+    }
+    
+    #
+    # Do we have any analytics patterns ?
+    #
+    if ( (! defined($pattern_list)) || ($pattern_list eq "") ) {
+        #
+        # No web analytics values
+        #
+        print "No web analytics values defined\n" if $debug;
+        return;
+    }
+
+    #
+    # Check each document section's list of links
+    #
+    while ( ($section, $list_addr) = each %$link_sets ) {
+        print "Check site include links in section $section\n" if $debug;
+
+        #
+        # Check each link in the section
+        #
+        foreach $link (@$list_addr) {
+            $link_url = $link->abs_url;
+
+            #
+            # Check each possible analytics pattern
+            #
+            foreach $pattern (@$analytics_patterns) {
+                print "Check for pattern \"$pattern\" in \"$link_url\"\n" if $debug;
+                if ( index($link_url, $pattern) != -1 ) {
+                    print "Found web analytics pattern $pattern\n" if $debug;
+                    $found_analytics_link = 1;
+                    last;
+                }
+            }
+
+            #
+            # Did we find a pattern match ?
+            #
+            if ( $found_analytics_link ) {
+                last;
+            }
+        }
+
+        #
+        # Did we find a pattern match ?
+        #
+        if ( $found_analytics_link ) {
+            last;
+        }
+    }
+
+    #
+    # Did we not find an analytics link ?
+    #
+    if ( ! $found_analytics_link ) {
+        Record_Result("TP_PW_ANALYTICS", -1, -1, "",
+                      String_Value("Did not find web analytics code") .
+                                  String_Value("expecting one of") .
+                                  join(", ", @$analytics_patterns));
+    }
+}
+
+#***********************************************************************
+#
 # Name: TP_PW_Check_Links
 #
 # Parameters: tqa_results_list - address of hash table results
@@ -6146,6 +6277,11 @@ sub TP_PW_Check_Links {
     # login.
     #
     Check_Application_Template_Navigation($url, $link_sets, $logged_in);
+
+    #
+    # Check for web analytics links.
+    #
+    Check_Web_Analytics_Link($url, $link_sets, $logged_in, $profile);
 
     #
     # Add our results to previous results

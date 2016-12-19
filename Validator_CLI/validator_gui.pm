@@ -2563,9 +2563,9 @@ return 1;
 #
 # Name: validator_gui.pm
 #
-# $Revision: 7331 $
+# $Revision: 7537 $
 # $URL: svn://10.36.21.45/trunk/Web_Checks/Validator_CLI/Tools/validator_gui.pm $
-# $Date: 2015-11-05 05:03:31 -0500 (Thu, 05 Nov 2015) $
+# $Date: 2016-03-02 06:47:50 -0500 (Wed, 02 Mar 2016) $
 #
 # Description:
 #
@@ -2705,14 +2705,15 @@ my ($url_list_callback, $version, %default_report_options);
 my (%report_options_labels, $results_file_name, $open_data_callback);
 my (%results_file_suffixes, $first_results_tab, $runtime_error_callback);
 my (%login_credentials, $results_save_callback);
-my (%url_401_user, %url_401_password);
+my (%url_401_user, %url_401_password, $enable_generated_markup);
 my ($testcase_profile_groups_label, $testcase_profile_groups_names);
 my ($testcase_profile_groups_values, %report_options_values);
 my ($testcase_profile_groups_config_option);
 
 my ($csv_results_fh, $csv_results_file_name, $csv_object);
 my (@csv_results_fields) = ("type", "url", "testcase", "description", "line_no",
-                            "column_no", "page_no","source_line","message");
+                            "column_no", "page_no","source_line","message",
+                            "help_url");
 if ( $have_threads ) {
     share(\$csv_results_file_name);
 }
@@ -2736,7 +2737,9 @@ my (%site_configuration_fields) = (
     "logoutinterstitialcount", "",
     "logoutinterstitialcount", "",
     "httpproxy", "",
+    "process_pdf", "",
     "report_fails_only", "",
+    "report_passes_only", "",
    );
 
 my ($language) = "eng";
@@ -3066,10 +3069,16 @@ sub Print_TQA_Result_to_CSV {
                $result_object->description, $result_object->line_no,
                $result_object->column_no, $result_object->page_no,
                $result_object->source_line);
+
     #
     # Add message field. Limit text to 10K characters
     #
     push(@fields, substr($result_object->message, 0, 10240));
+
+    #
+    # Add help URL field
+    #
+    push(@fields, $result_object->help_url);
 
     #
     # Write fields to the CSV file.
@@ -3895,6 +3904,14 @@ sub Run_Open_Data_Callback {
         if ( defined($csv_results_fh) ) {
             close($csv_results_fh);
         }
+
+        #
+        # Do we have a Save Results call back function ?
+        #
+        if ( defined($results_save_callback) && defined($results_file_name) ) {
+            print "Call Results_Save_As callback function\n" if $debug;
+            &$results_save_callback($results_file_name);
+        }
     }
     else {
         print "Error: Missing Open Data callback function in Run_Open_Data_Callback\n";
@@ -3924,13 +3941,30 @@ sub Read_Password {
     ReadMode(4);
     
     #
-    # Read until we get the Enter key (decimal value of 13)
+    # Read until we get the Enter key (decimal value of 10 or 13)
     #
-    while( ord($key = ReadKey(0)) != 13 ) {
+    while( 1 ) {
+        #
+        # Read a keystroke from stdin
+        #
+        $key = ReadKey(0);
+        
+        #
+        # Did we get a character ?
+        #
+        if ( ! defined($key) ) {
+            last;
+        }
+        #
+        # Do we have enter, either 13 for Windows or 10 for Linux.
+        #
+        elsif ( (ord($key) == 13) || (ord($key) == 10) ) {
+            last;
+        }
         #
         # Was a backspace or del key pressed ?
         #
-        if(ord($key) == 127 || ord($key) == 8) {
+        elsif (ord($key) == 127 || ord($key) == 8) {
             #
             # Remove the last char from the password
             #
@@ -3945,13 +3979,14 @@ sub Read_Password {
         #
         # Ignore any control characters
         #
-        elsif(ord($key) < 32) {
+        elsif( ord($key) < 32 ) {
         }
         #
-        # A character for the password
+        # A character for the password.  Print an
+        # asterisk to the screen.
         #
         else {
-            $password = $password.$key;
+            $password = $password . $key;
             print "*";
         }
     }
@@ -4474,6 +4509,7 @@ sub Read_Crawl_File {
     # Report failures only
     #
     $crawl_details{"report_fails_only"} = 1;
+    $crawl_details{"report_passes_only"} = 0;
     $crawl_details{"process_pdf"} = 1;
 
     #
@@ -4614,6 +4650,13 @@ sub Read_Crawl_File {
                 $url_401_password{$url} = $value;
             }
         }
+        #
+        # Have generated source flag ?
+        #
+        elsif ( $key eq "enable_generated_markup" ) {
+            ($key, $value) = split(/\s+/, $line, 2);
+            $enable_generated_markup = $value;
+        }
     }
 
     #
@@ -4712,6 +4755,7 @@ sub Read_URL_File {
     # Report failures only
     #
     $report_options{"report_fails_only"} = 1;
+    $report_options{"report_passes_only"} = 0;
     $report_options{"process_pdf"} = 1;
 
     #
@@ -4825,6 +4869,13 @@ sub Read_URL_File {
                 $url_401_password{$url} = $value;
             }
         }
+        #
+        # Have generated source flag ?
+        #
+        elsif ( $key eq "enable_generated_markup" ) {
+            ($key, $value) = split(/\s+/, $line, 2);
+            $enable_generated_markup = $value;
+        }
         else {
             #
             # Assume this is a URL
@@ -4882,6 +4933,7 @@ sub Read_HTML_File {
     # Report failures only
     #
     $report_options{"report_fails_only"} = 1;
+    $report_options{"report_passes_only"} = 0;
     $report_options{"process_pdf"} = 1;
 
     #
@@ -5082,7 +5134,7 @@ sub Read_Open_Data_File {
 
     my (%report_options, $line, $field_name, $value, %dataset_urls);
     my ($data_list, $dictionary_list, $resource_list, $tab, $suffix);
-    my ($key, $api_list, $description_url);
+    my ($key, $api_list, $description_url, $label);
 
     #
     # Copy in default report options
@@ -5095,6 +5147,7 @@ sub Read_Open_Data_File {
     # Report failures only
     #
     $report_options{"report_fails_only"} = 1;
+    $report_options{"report_passes_only"} = 0;
     $report_options{"process_pdf"} = 1;
 
     #
@@ -5140,18 +5193,12 @@ sub Read_Open_Data_File {
         #
         # Check configuration field name
         #
-        if ( defined($default_report_options{$field_name}) ) {
-            $report_options{$field_name} = $value;
-            print "Set configuration selector $field_name to $value\n" if $debug;
-
-            #
-            # Is this a group profile option ?
-            #
-            if ( $key eq $testcase_profile_groups_config_option ) {
-                #
-                # Update all the other testcase profile options
-                #
-                Select_Testcase_Profile_Group($value, \%report_options);
+        if ( defined($report_options_labels{$field_name}) ) {
+            print "Report options type $field_name, value = $value\n" if $debug;
+            if ( defined($value) ) {
+                $label = $report_options_labels{$field_name};
+                $report_options{$label} = $value;
+                print "Report options type $label, value = $value\n" if $debug;
             }
         }
         #

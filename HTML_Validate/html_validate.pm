@@ -535,9 +535,9 @@ return 1;
 #
 # Name:   html_validate.pm
 #
-# $Revision: 7130 $
+# $Revision: 7631 $
 # $URL: svn://10.36.21.45/trunk/Web_Checks/HTML_Validate/Tools/html_validate.pm $
-# $Date: 2015-05-07 15:35:11 -0400 (Thu, 07 May 2015) $
+# $Date: 2016-07-22 03:04:06 -0400 (Fri, 22 Jul 2016) $
 #
 # Description:
 #
@@ -611,7 +611,9 @@ BEGIN {
 #***********************************************************************
 
 my (@paths, $this_path, $program_dir, $program_name, $paths, $validate_cmnd);
-my ($doctype_label, $doctype_version, $doctype_class);
+my ($doctype_label, $doctype_version, $doctype_class, $html5_validate_jar);
+my ($java_options);
+my ($runtime_error_reported) = 0;
 
 my ($debug) = 0;
 my ($VALID_HTML) = 1;
@@ -625,6 +627,7 @@ my %string_table_en = (
     "Error",                 "Error: ",
     "Line",                  "Line",
     "column",                "column",
+    "Runtime Error",         "Runtime Error",
     "Source line",           "Source line:",
 );
 
@@ -632,6 +635,7 @@ my %string_table_fr = (
     "Error",                 "Erreur: ",
     "Line",                  "Ligne",
     "column",                "colonne",
+    "Runtime Error",         "Erreur D'Exécution",
     "Source line",           "Ligne de la source:",
 );
 
@@ -743,19 +747,36 @@ sub Validate_XHTML_Content {
 
     my ($status) = $VALID_HTML;
     my ($validator_output, $line, $html_file_name, @results_list);
-    my ($result_object, $fh);
+    my ($result_object, $fh, $char);
 
     #
     # Write the content to a temporary file
     #
     print "Validate_XHTML_Content create temporary HTML file\n" if $debug;
-    ($fh, $html_file_name) = tempfile( SUFFIX => '.htm');
+    ($fh, $html_file_name) = tempfile("WPSS_TOOL_XXXXXXXXXX", SUFFIX => '.htm',
+                                      TMPDIR => 1);
     if ( ! defined($fh) ) {
         print "Error: Failed to create temporary file in Validate_XHTML_Content\n";
         return(@results_list);
     }
     binmode $fh;
-    print $fh $$content;
+
+    #
+    # Remove any UTF-8 BOM from the content.  The XHTML validator
+    # does not handle it.
+    #
+    $char = substr($$content, 0, 1);
+    if ( ord($char) == 65279 ) {
+        print "Skip over BOM xFEFF\n" if $debug;
+        print $fh substr($$content, 1);
+    }
+    elsif ( $$content =~ s/^\xEF\xBB\xBF// ) {
+        print "Skip over BOM xFEBBBF\n" if $debug;
+        print $fh substr($$content, 3);
+    }
+    else {
+        print $fh $$content;
+    }
     close($fh);
 
     #
@@ -782,6 +803,30 @@ sub Validate_XHTML_Content {
                                                 $validator_output,
                                                 $this_url);
         push (@results_list, $result_object);
+    }
+    elsif ( $validator_output ne "" ) {
+        #
+        # Some error trying to run the validator
+        #
+        print "csv-validator command failed\n" if $debug;
+        print STDERR "csv-validator command failed\n";
+        print STDERR "  $validate_cmnd $charset $html_file_name\n";
+        print STDERR "$validator_output\n";
+
+        #
+        # Report runtime error only once
+        #
+        if ( ! $runtime_error_reported ) {
+            $result_object = tqa_result_object->new("HTML_VALIDATION",
+                                                    1, "HTML_VALIDATION",
+                                                    -1, -1, "",
+                                                    String_Value("Runtime Error") .
+                                                    " \"$validate_cmnd $charset $html_file_name\"\n" .
+                                                    " \"$validator_output\"",
+                                                    $this_url);
+            push (@results_list, $result_object);
+            $runtime_error_reported = 1;
+        }
     }
 
     #
@@ -816,12 +861,14 @@ sub Validate_HTML5_Content {
     my ($result_object, $fh, $ref, $messages, $eval_output, $item);
     my ($ref_type, $messages, $errors, $line_no, $column_no, $message);
     my (@lines, $source_line, $start_col);
+    my ($command_failed) = 0;
 
     #
     # Write the content to a temporary file
     #
     print "Validate_HTML5_Content create temporary HTML file\n" if $debug;
-    ($fh, $html_file_name) = tempfile( SUFFIX => '.html');
+    ($fh, $html_file_name) = tempfile("WPSS_TOOL_XXXXXXXXXX", SUFFIX => '.html',
+                                      TMPDIR => 1);
     if ( ! defined($fh) ) {
         print "Error: Failed to create temporary file in Validate_HTML5_Content\n";
         return(@results_list);
@@ -838,8 +885,8 @@ sub Validate_HTML5_Content {
     #
     # Run the Nu Markup Checker on the supplied content
     #
-    print "Run Nu Markup Checker\n --> java -jar lib/vnu.jar $html_file_name 2>\&1\n" if $debug;
-    $validator_output = `java -Xss512k -jar "$program_dir/lib/vnu.jar" --errors-only --format json $html_file_name 2>\&1`;
+    print "Run Nu Markup Checker\n --> java -jar \"$html5_validate_jar\" --errors-only --format json \"$html_file_name\" 2>\&1\n" if $debug;
+    $validator_output = `java $java_options -jar \"$html5_validate_jar\" --errors-only --format json \"$html_file_name\" 2>\&1`;
     print "Validator output = $validator_output\n" if $debug;
 
     #
@@ -945,6 +992,7 @@ sub Validate_HTML5_Content {
             }
             else {
                 print "Messages is not a array, $ref_type\n" if $debug;
+                $command_failed = 1;
             }
         }
         #
@@ -959,6 +1007,7 @@ sub Validate_HTML5_Content {
             # No messages table
             #
             print "No messages table\n" if $debug;
+            $command_failed = 1;
         }
 
         #
@@ -971,6 +1020,30 @@ sub Validate_HTML5_Content {
                                                     $errors,
                                                     $this_url);
             push (@results_list, $result_object);
+        }
+        elsif ( $command_failed ) {
+            #
+            # Some error trying to run the validator
+            #
+            print "HTML5 validator command failed\n" if $debug;
+            print STDERR "HTML5 validator command failed\n";
+            print STDERR "java $java_options -jar \"$html5_validate_jar\" --errors-only --format json \"$html_file_name\"\n";
+            print STDERR "$validator_output\n";
+
+            #
+            # Report runtime error only once
+            #
+            if ( ! $runtime_error_reported ) {
+                $result_object = tqa_result_object->new("HTML_VALIDATION",
+                                                        1, "HTML_VALIDATION",
+                                                        -1, -1, "",
+                                                        String_Value("Runtime Error") .
+                                                        " \"java $java_options -jar \"$html5_validate_jar\" --errors-only --format json \"$html_file_name\"\"\n" .
+                                                        " \"$validator_output\"",
+                                                        $this_url);
+                $runtime_error_reported = 1;
+                push (@results_list, $result_object);
+            }
         }
     }
     else {
@@ -1099,7 +1172,7 @@ sub Get_Doctype {
 # Name: HTML_Validate_Content
 #
 # Parameters: this_url - a URL
-#             charset - character set of content
+#             resp - HTTP::Response object
 #             content - HTML content pointer
 #
 # Description:
@@ -1109,14 +1182,37 @@ sub Get_Doctype {
 #
 #***********************************************************************
 sub HTML_Validate_Content {
-    my ($this_url, $charset, $content) = @_;
+    my ($this_url, $resp, $content) = @_;
 
-    my (@results_list, $result_object);
+    my (@results_list, $result_object, $charset);
 
     #
     # Do we have any content ?
     #
     if ( length($$content) > 0 ) {
+        #
+        # Get the character set encoding, if any, that is specified in the
+        # response header.
+        #
+        $charset = "";
+        if ( defined($resp) ) {
+            $charset = $resp->header('Content-Type');
+
+            #
+            # Is a charset defined in the header ?
+            #
+            if ( $charset =~ /charset=/i ) {
+                $charset =~ s/^.*charset=//g;
+                $charset =~ s/,.*//g;
+                $charset =~ s/ .*//g;
+                $charset =~ s/".*//g;
+                $charset =~ s/\s+//g;
+                $charset =~ s/\n//g;
+            }
+            else {
+                $charset = "";
+            }
+        }
 
         #
         # Determine the HTML/XHTML language of the content.
@@ -1225,13 +1321,17 @@ if ( $^O =~ /MSWin32/ ) {
     # Windows.
     #
     $validate_cmnd = ".\\bin\\win_validate.pl";
+    $html5_validate_jar = ".\\lib\\vnu.jar";
+    $java_options = "-Xss512k";
 } else {
     #
     # Not Windows.
     #
     $validate_cmnd = "$program_dir/bin/validate";
+    $html5_validate_jar = "$program_dir/lib/vnu.jar";
+    $java_options = "-Xss1024k";
 }
-$ENV{VALIDATE_HOME} = $program_dir;
+$ENV{VALIDATE_HOME} = "$program_dir/bin";
 
 #
 # Add to path for shared libraries (Solaris only)

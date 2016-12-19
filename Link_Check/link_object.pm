@@ -1003,9 +1003,9 @@ return 1;
 #
 # Name: link_object.pm
 #
-# $Revision: 7126 $
+# $Revision: 7582 $
 # $URL: svn://10.36.21.45/trunk/Web_Checks/Link_Check/Tools/link_object.pm $
-# $Date: 2015-05-06 09:14:31 -0400 (Wed, 06 May 2015) $
+# $Date: 2016-06-03 09:09:20 -0400 (Fri, 03 Jun 2016) $
 #
 # Description:
 #
@@ -1025,9 +1025,12 @@ return 1;
 #    attr - get/set the set of link attributes
 #    column_no - get/set column number value
 #    content_length - get/set link content length value
+#    content_section - get/set the name of the content section
 #    domain_path - get/set the protocol/domain/path portion of the URL
+#    generated_content - get/set the generated content value
 #    has_alt - get/set the has_alt attribute
 #    has_img - get/set the has_img attribute
+#    in_anchor - get/set the in_anchor attribute
 #    in_list - get/set the in_list attribute
 #    is_archived - get/set the is_archived attribute
 #    is_redirected - get/set the is_redirected attribute
@@ -1040,6 +1043,7 @@ return 1;
 #    mime_type - get/set mime-type value
 #    modified_content - get/set the modified content value
 #    noscript - get/set the noscript value
+#    on_page_id_reference - return the on_page_id_reference value
 #    query - get/set the query portion of the URL
 #    referer_url - get/set the referer URL
 #    source_line - get/set source value
@@ -1167,9 +1171,12 @@ sub new {
     $self->{"attr"} = \%attr;
     $self->{"column_no"} = $column_no;
     $self->{"content_length"} = 0;
+    $self->{"content_section"} = "BODY";
+    $self->{"generated_content"} = 0;
     $self->{"has_alt"} = 0;
     $self->{"has_img"} = 0;
     $self->{"href"} = $href;
+    $self->{"in_anchor"} = 0;
     $self->{"in_list"} = 0;
     $self->{"is_archived"} = 0;
     $self->{"is_redirected"} = 0;
@@ -1195,6 +1202,19 @@ sub new {
     else {
         $self->{"domain_path"} = "";
         $self->{"query"} = "";
+    }
+    
+    #
+    # Is the href value just an anchor on the same page ?
+    #
+    if ( defined($href) && ($href =~ /^#.*/) ) {
+        $self->{"on_page_id_reference"} = 1;
+    }
+    elsif ( defined($href) && ($href =~ /^\?.*/) ) {
+        $self->{"on_page_id_reference"} = 1;
+    }
+    else {
+        $self->{"on_page_id_reference"} = 0;
     }
 
     #
@@ -1253,7 +1273,7 @@ sub new {
         print " domain_path = " . $self->domain_path . "\n";
         print " query = " . $self->query . "\n";
     }
-    
+
     #
     # Return reference to object.
     #
@@ -1428,13 +1448,42 @@ sub content_length {
     my ($self, $content_length) = @_;
 
     #
-    # Was a content lngth value supplied ?
+    # Was a content length value supplied ?
     #
     if ( defined($content_length) ) {
         $self->{"content_length"} = $content_length;
     }
     else {
         return($self->{"content_length"});
+    }
+}
+
+#********************************************************
+#
+# Name: content_section
+#
+# Parameters: self - class reference
+#             content_section - content section(optional)
+#
+# Description:
+#
+#   This function either sets or returns the content section
+# attribute of the link object. If a value is supplied,
+# it is saved in the object. If no value is supplied,
+# the current value is returned.
+#
+#********************************************************
+sub content_section {
+    my ($self, $content_section) = @_;
+
+    #
+    # Was a content section value supplied ?
+    #
+    if ( defined($content_section) ) {
+        $self->{"content_section"} = $content_section;
+    }
+    else {
+        return($self->{"content_section"});
     }
 }
 
@@ -1466,6 +1515,35 @@ sub domain_path {
     }
     else {
         return($self->{"domain_path"});
+    }
+}
+
+#********************************************************
+#
+# Name: generated_content
+#
+# Parameters: self - class reference
+#             value - generated_content value (optional)
+#
+# Description:
+#
+#   This function either sets or returns the generated_content
+# attribute of the link object. If a value is supplied,
+# it is saved in the object. If no value is supplied,
+# the current value is returned.
+#
+#********************************************************
+sub generated_content {
+    my ($self, $value) = @_;
+
+    #
+    # Was a value supplied ?
+    #
+    if ( defined($value) ) {
+        $self->{"generated_content"} = $value;
+    }
+    else {
+        return($self->{"generated_content"});
     }
 }
 
@@ -1553,6 +1631,35 @@ sub href {
     }
     else {
         return($self->{"href"});
+    }
+}
+
+#********************************************************
+#
+# Name: in_anchor
+#
+# Parameters: self - class reference
+#             in_anchor_value - in_anchor value (optional)
+#
+# Description:
+#
+#   This function either sets or returns the in_anchor
+# attribute of the link object.
+# If a value is supplied, it is saved in the object.
+# If no value is supplied, the current value is returned.
+#
+#********************************************************
+sub in_anchor {
+    my ($self, $in_anchor_value) = @_;
+
+    #
+    # Was a in_anchor value supplied ?
+    #
+    if ( defined($in_anchor_value) ) {
+        $self->{"in_anchor"} = $in_anchor_value;
+    }
+    else {
+        return($self->{"in_anchor"});
     }
 }
 
@@ -1902,6 +2009,26 @@ sub noscript {
     else {
         return($self->{"noscript"});
     }
+}
+
+#********************************************************
+#
+# Name: on_page_id_reference
+#
+# Parameters: self - class reference
+#
+# Description:
+#
+#   This function returns the on_page_id_reference value.
+#
+#********************************************************
+sub on_page_id_reference {
+    my ($self) = @_;
+
+    #
+    # Return field value
+    #
+    return($self->{"on_page_id_reference"});
 }
 
 #********************************************************

@@ -1,6 +1,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 4.0.1
 =======
 4.6.0
@@ -10,4 +11,8 @@
 >>>>>>> upstream/master
 =======
 5.2.0
+>>>>>>> upstream/master
+=======
+6.2.0
+
 >>>>>>> upstream/master

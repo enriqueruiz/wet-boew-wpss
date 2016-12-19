@@ -1,22 +1,23 @@
 #***********************************************************************
 #
-# Name:   xml_ttml_check.pm
+# Name:   epub_check.pm
 #
-# $Revision: 6999 $
-# $URL: svn://10.36.20.226/trunk/Web_Checks/TQA_Check/Tools/xml_ttml_check.pm $
-# $Date: 2015-01-19 09:49:46 -0500 (Mon, 19 Jan 2015) $
+# $Revision: 6958 $
+# $URL: svn://10.36.20.226/trunk/Web_Checks/TQA_Check/Tools/epub_check.pm $
+# $Date: 2015-01-06 09:25:49 -0500 (Tue, 06 Jan 2015) $
 #
 # Description:
 #
-#   This file contains routines that parse TTML XML files and check for
-# a number of acceessibility (WCAG) check points.
+#   This file contains routines that parse EPUB files and check for
+# a number of accessibility (WCAG) check points.
 #
 # Public functions:
-#     Set_XML_TTML_Check_Language
-#     Set_XML_TTML_Check_Debug
-#     Set_XML_TTML_Check_Testcase_Data
-#     Set_XML_TTML_Check_Test_Profile
-#     XML_TTML_Check
+#     Set_EPUB_Check_Language
+#     Set_EPUB_Check_Debug
+#     Set_EPUB_Check_Valid_Markup
+#     Set_EPUB_Check_Testcase_Data
+#     Set_EPUB_Check_Test_Profile
+#     EPUB_Check
 #
 # Terms and Conditions of Use
 #
@@ -26,7 +27,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2011 Government of Canada
+# Copyright (c) 2015 Government of Canada
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -48,7 +49,7 @@
 #
 #***********************************************************************
 
-package xml_ttml_check;
+package epub_check;
 
 use strict;
 use URI::URL;
@@ -65,11 +66,12 @@ BEGIN {
     use vars qw($VERSION @ISA @EXPORT);
 
     @ISA     = qw(Exporter);
-    @EXPORT  = qw(Set_XML_TTML_Check_Language
-                  Set_XML_TTML_Check_Debug
-                  Set_XML_TTML_Check_Testcase_Data
-                  Set_XML_TTML_Check_Test_Profile
-                  XML_TTML_Check
+    @EXPORT  = qw(Set_EPUB_Check_Language
+                  Set_EPUB_Check_Debug
+                  Set_EPUB_Check_Valid_Markup
+                  Set_EPUB_Check_Testcase_Data
+                  Set_EPUB_Check_Test_Profile
+                  EPUB_Check
                   );
     $VERSION = "1.0";
 }
@@ -83,29 +85,26 @@ BEGIN {
 my ($debug) = 0;
 my (%testcase_data, $results_list_addr);
 my (@paths, $this_path, $program_dir, $program_name, $paths);
-my (%xml_ttml_check_profile_map, $current_xml_ttml_check_profile, $current_url);
-my ($save_text_between_tags, $saved_text, $current_content_lang_code);
+my (%epub_check_profile_map, $current_epub_check_profile, $current_url);
 
+my ($is_valid_markup) = -1;
 my ($max_error_message_string)= 2048;
 
 #
 # Status values
 #
-my ($xml_ttml_check_fail) = 1;
+my ($epub_check_pass)       = 0;
+my ($epub_check_fail)       = 1;
 
 #
 # String table for error strings.
 #
 my %string_table_en = (
-    "does not match content language", "does not match content language",
-    "Missing tt language attribute",   "Missing <tt> language attribute",
-    "TT language attribute",           "<tt> language attribute",
+    "Fails validation",           "Fails validation, see validation results for details.",
     );
 
 my %string_table_fr = (
-    "does not match content language", "ne correspond pas à la langue de contenu",
-    "Missing tt language attribute",   "Attribut manquant pour <tt>",
-    "TT language attribute",           "L'attribut du langage <tt>",
+    "Fails validation",           "Échoue la validation, voir les résultats de validation pour plus de détails.",
     );
 
 #
@@ -115,7 +114,7 @@ my ($string_table) = \%string_table_en;
 
 #***********************************************************************
 #
-# Name: Set_XML_TTML_Check_Debug
+# Name: Set_EPUB_Check_Debug
 #
 # Parameters: this_debug - debug flag
 #
@@ -124,7 +123,7 @@ my ($string_table) = \%string_table_en;
 #   This function sets the package global debug flag.
 #
 #***********************************************************************
-sub Set_XML_TTML_Check_Debug {
+sub Set_EPUB_Check_Debug {
     my ($this_debug) = @_;
 
     #
@@ -135,7 +134,7 @@ sub Set_XML_TTML_Check_Debug {
 
 #**********************************************************************
 #
-# Name: Set_XML_TTML_Check_Language
+# Name: Set_EPUB_Check_Language
 #
 # Parameters: language
 #
@@ -145,7 +144,7 @@ sub Set_XML_TTML_Check_Debug {
 # by this module.
 #
 #***********************************************************************
-sub Set_XML_TTML_Check_Language {
+sub Set_EPUB_Check_Language {
     my ($language) = @_;
 
     #
@@ -161,6 +160,38 @@ sub Set_XML_TTML_Check_Language {
         $string_table = \%string_table_en;
     }
 }
+
+#***********************************************************************
+#
+# Name: Set_EPUB_Check_Valid_Markup
+#
+# Parameters: valid_epub - flag
+#
+# Description:
+#
+#   This function copies the passed flag into the global
+# variable is_valid_xtml.  The possible values are
+#    1 - valid EPUB
+#    0 - not valid EPUB
+#   -1 - unknown validity.
+# This value is used when assessing WCAG 2.0-G134
+#
+#***********************************************************************
+sub Set_EPUB_Check_Valid_Markup {
+    my ($valid_epub) = @_;
+
+    #
+    # Copy the data into global variable
+    #
+    if ( defined($valid_epub) ) {
+        $is_valid_markup = $valid_epub;
+    }
+    else {
+        $is_valid_markup = -1;
+    }
+    print "Set_EPUB_Check_Valid_Markup, validity = $is_valid_markup\n" if $debug;
+}
+
 
 #**********************************************************************
 #
@@ -198,7 +229,7 @@ sub String_Value {
 
 #***********************************************************************
 #
-# Name: Set_XML_TTML_Check_Testcase_Data
+# Name: Set_EPUB_Check_Testcase_Data
 #
 # Parameters: testcase - testcase identifier
 #             data - string of data
@@ -209,7 +240,7 @@ sub String_Value {
 # for the specified testcase identifier.
 #
 #***********************************************************************
-sub Set_XML_TTML_Check_Testcase_Data {
+sub Set_EPUB_Check_Testcase_Data {
     my ($testcase, $data) = @_;
 
     #
@@ -220,10 +251,10 @@ sub Set_XML_TTML_Check_Testcase_Data {
 
 #***********************************************************************
 #
-# Name: Set_XML_TTML_Check_Test_Profile
+# Name: Set_EPUB_Check_Test_Profile
 #
 # Parameters: profile - XML check test profile
-#             xml_ttml_checks - hash table of testcase name
+#             epub_checks - hash table of testcase name
 #
 # Description:
 #
@@ -231,18 +262,18 @@ sub Set_XML_TTML_Check_Testcase_Data {
 # The hash table is indexed by XML testcase name.
 #
 #***********************************************************************
-sub Set_XML_TTML_Check_Test_Profile {
-    my ($profile, $xml_ttml_checks) = @_;
+sub Set_EPUB_Check_Test_Profile {
+    my ($profile, $epub_checks) = @_;
 
-    my (%local_xml_ttml_checks);
+    my (%local_epub_checks);
 
     #
     # Make a local copy of the hash table as we will be storing the address
     # of the hash.
     #
-    print "Set_XML_TTML_Check_Test_Profile, profile = $profile\n" if $debug;
-    %local_xml_ttml_checks = %$xml_ttml_checks;
-    $xml_ttml_check_profile_map{$profile} = \%local_xml_ttml_checks;
+    print "Set_EPUB_Check_Test_Profile, profile = $profile\n" if $debug;
+    %local_epub_checks = %$epub_checks;
+    $epub_check_profile_map{$profile} = \%local_epub_checks;
 }
 
 #***********************************************************************
@@ -263,15 +294,8 @@ sub Initialize_Test_Results {
     #
     # Set current hash tables
     #
-    $current_xml_ttml_check_profile = $xml_ttml_check_profile_map{$profile};
+    $current_epub_check_profile = $epub_check_profile_map{$profile};
     $results_list_addr = $local_results_list_addr;
-    
-    #
-    # Initialize global variables
-    #
-    $save_text_between_tags = 0;
-    $saved_text = "";
-    $current_content_lang_code = "unknown";
 }
 
 #***********************************************************************
@@ -315,18 +339,18 @@ sub Print_Error {
 #
 #***********************************************************************
 sub Record_Result {
-    my ( $testcase, $line, $column, $text, $error_string ) = @_;
+    my ( $testcase, $line, $column,, $text, $error_string ) = @_;
 
     my ($result_object);
 
     #
     # Is this testcase included in the profile
     #
-    if ( defined($testcase) && defined($$current_xml_ttml_check_profile{$testcase}) ) {
+    if ( defined($testcase) && defined($$current_epub_check_profile{$testcase}) ) {
         #
         # Create result object and save details
         #
-        $result_object = tqa_result_object->new($testcase, $xml_ttml_check_fail,
+        $result_object = tqa_result_object->new($testcase, $epub_check_fail,
                                                 TQA_Testcase_Description($testcase),
                                                 $line, $column, $text,
                                                 $error_string, $current_url);
@@ -342,143 +366,7 @@ sub Record_Result {
 
 #***********************************************************************
 #
-# Name: TT_Tag_Handler
-#
-# Parameters: self - reference to this parser
-#             tagname - name of tag
-#             attr - hash table of attributes
-#
-# Description:
-#
-#   This function handles the <tt> tag.  It checks for an xml:lang attribute.
-#
-#***********************************************************************
-sub TT_Tag_Handler {
-    my ($self, $tagname, %attr) = @_;
-
-    my ($lang);
-
-    #
-    # Do we have a language attribute ?
-    #
-    if ( ! defined($attr{"xml:lang"}) ) {
-        #
-        # Missing language attribute
-        #
-        Record_Result("WCAG_2.0-SC3.1.1", $self->current_line,
-                      $self->current_column, $self->original_string,
-                      String_Value("Missing tt language attribute") .
-                      " 'xml:lang'");
-    }
-    else {
-        #
-        # Save language code, but strip off any dialect value
-        #
-        $lang = lc($attr{"xml:lang"});
-        $lang =~ s/-.*$//g;
-
-        #
-        # Convert possible 2 character language code into a 3 character code.
-        #
-        if ( defined($language_map::iso_639_1_iso_639_2T_map{$lang}) ) {
-            $lang = $language_map::iso_639_1_iso_639_2T_map{$lang};
-            print "tt language is $lang\n" if $debug;
-        }
-        else {
-            print "Unknown tt language $lang\n" if $debug;
-        }
-
-        #
-        # Does the lang attribute match the content language ?
-        #
-        if ( ($current_content_lang_code ne "" ) &&
-             ($lang ne $current_content_lang_code) ) {
-            Record_Result("WCAG_2.0-SC3.1.1", $self->current_line,
-                      $self->current_column, $self->original_string,
-                          String_Value("TT language attribute") .
-                          " '$lang' " .
-                          String_Value("does not match content language") .
-                          " '$current_content_lang_code'");
-        }
-    }
-}
-
-#***********************************************************************
-#
-# Name: Start_Handler
-#
-# Parameters: self - reference to this parser
-#             tagname - name of tag
-#             attr - hash table of attributes
-#
-# Description:
-#
-#   This function is a callback handler for XML parsing that
-# handles the start of XML tags.
-#
-#***********************************************************************
-sub Start_Handler {
-    my ($self, $tagname, %attr) = @_;
-
-    #
-    # Check tags.
-    #
-    print "Start_Handler tag $tagname\n" if $debug;
-    if ( $tagname eq "tt" ) {
-        TT_Tag_Handler($self, $tagname, %attr);
-    }
-}
-
-#***********************************************************************
-#
-# Name: End_Handler
-#
-# Parameters: self - reference to this parser
-#             tagname - name of tag
-#
-# Description:
-#
-#   This function is a callback handler for XML parsing that
-# handles end tags.
-#
-#***********************************************************************
-sub End_Handler {
-    my ($self, $tagname) = @_;
-
-    #
-    # Check tag
-    #
-    print "End_Handler tag $tagname\n" if $debug;
-
-}
-
-#***********************************************************************
-#
-# Name: Char_Handler
-#
-# Parameters: self - reference to this parser
-#             string - text
-#
-# Description:
-#
-#   This function is a callback handler for XML parsing that
-# handles text content between tags.
-#
-#***********************************************************************
-sub Char_Handler {
-    my ($self, $string) = @_;
-
-    #
-    # Are we saving text ?
-    #
-    if ( $save_text_between_tags ) {
-        $saved_text .= $string;
-    }
-}
-
-#***********************************************************************
-#
-# Name: XML_TTML_Check
+# Name: EPUB_Check
 #
 # Parameters: this_url - a URL
 #             language - URL language
@@ -490,18 +378,17 @@ sub Char_Handler {
 #   This function runs a number of technical QA checks on XML content.
 #
 #***********************************************************************
-sub XML_TTML_Check {
+sub EPUB_Check {
     my ($this_url, $language, $profile, $content) = @_;
 
-    my (@tqa_results_list, $result_object, $parser, $eval_output);
-    my ($lang_code, $lang, $ttml_content, $status);
+    my (@tqa_results_list, $result_object, @feed_results, @ttml_results);
 
     #
     # Do we have a valid profile ?
     #
-    print "XML_TTML_Check: Checking URL $this_url, lanugage = $language, profile = $profile\n" if $debug;
-    if ( ! defined($xml_ttml_check_profile_map{$profile}) ) {
-        print "XML_TTML_Check: Unknown XML testcase profile passed $profile\n";
+    print "EPUB_Check: Checking URL $this_url, lanugage = $language, profile = $profile\n" if $debug;
+    if ( ! defined($epub_check_profile_map{$profile}) ) {
+        print "EPUB_Check: Unknown XML testcase profile passed $profile\n";
         return(@tqa_results_list);
     }
 
@@ -525,61 +412,28 @@ sub XML_TTML_Check {
     Initialize_Test_Results($profile, \@tqa_results_list);
 
     #
+    # Check to see if we were told that this document is not
+    # valid XML
+    #
+    if ( $is_valid_markup == 0 ) {
+        Record_Result("WCAG_2.0-G134", -1, 0, "",
+                      String_Value("Fails validation"));
+    }
+
+    #
     # Did we get any content ?
     #
-    if ( length($$content) == 0 ) {
-        print "No content passed to XML_TTML_Check\n" if $debug;
-        return(@tqa_results_list);
+    if ( length($$content) > 0 ) {
     }
     else {
-        #
-        # Get TTML content
-        #
-        ($lang_code, $ttml_content) = XML_TTML_Text_Extract_Text($$content);
-
-        #
-        # Get content language
-        #
-        ($lang_code, $lang, $status) = TextCat_Text_Language(\$ttml_content);
-
-        #
-        # Did we get a language from the content ?
-        #
-        if ( $status == 0 ) {
-            #
-            # Save language in a global variable
-            #
-            $current_content_lang_code = $lang_code;
-        }
-        else {
-            $current_content_lang_code = "";
-        }
-
-        #
-        # Create a document parser
-        #
-        print "XML_TTML_Check\n" if $debug;
-        $parser = XML::Parser->new;
-
-        #
-        # Add handlers for some of the XML tags
-        #
-        $parser->setHandlers(Start => \&Start_Handler);
-        $parser->setHandlers(End => \&End_Handler);
-
-        #
-        # Parse the content.
-        #
-        eval { $parser->parse($$content, ErrorContext => 2); };
-        $eval_output = $@ if $@;
-        print "Eval output = \"$eval_output\"\n" if $debug;
+        print "No content passed to EPUB_Check\n" if $debug;
     }
 
     #
     # Print testcase information
     #
     if ( $debug ) {
-        print "XML_TTML_Check results\n";
+        print "EPUB_Check results\n";
         foreach $result_object (@tqa_results_list) {
             print "Testcase: " . $result_object->testcase;
             print "  status   = " . $result_object->status . "\n";
@@ -608,8 +462,7 @@ sub XML_TTML_Check {
 sub Import_Packages {
 
     my ($package);
-    my (@package_list) = ("tqa_result_object", "tqa_testcases",
-                          "language_map", "textcat", "xml_ttml_text");
+    my (@package_list) = ("tqa_result_object", "tqa_testcases");
 
     #
     # Import packages, we don't use a 'use' statement as these packages

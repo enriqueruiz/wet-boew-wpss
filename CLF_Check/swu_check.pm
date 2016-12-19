@@ -6818,9 +6818,9 @@ return 1;
 #
 # Name:   swu_check.pm
 #
-# $Revision: 7339 $
+# $Revision: 7563 $
 # $URL: svn://10.36.21.45/trunk/Web_Checks/CLF_Check/Tools/swu_check.pm $
-# $Date: 2015-11-05 06:48:13 -0500 (Thu, 05 Nov 2015) $
+# $Date: 2016-04-13 04:15:57 -0400 (Wed, 13 Apr 2016) $
 #
 # Description:
 #
@@ -6988,27 +6988,27 @@ my ($clf_check_fail)       = 1;
 #
 my %string_table_en = (
     "at line:column",                 " at (line:column) ",
-    "Missing links in",               "Missing links in",
-    "Missing images in",              "Missing images in",
-    "Found",                          "Found ",
-    "links",                          "links",
-    "link",                           "link",
-    "images",                         "images",
-    "image",                          "image",
-    "in",                             " in ",
-    "or",                             " or ",
-    "in URL",                         " in URL ",
-    "Missing content section markers for", "Missing content section markers for ",
-    "GC navigation bar",              "GC navigation bar",
     "Breadcrumb",                     "Breadcrumb",
-    "GC footer",                      "GC footer",
-    "Invalid anchor text",            "Invalid anchor text ",
-    "Invalid href",                   "Invalid 'href' ",
+    "Displayed e-mail address does not match mailto",  "Displayed e-mail address does not match 'mailto'",
     "expecting",                      "expecting ",
     "expecting one of",               "expecting one of ",
-    "New heading level",              "New heading level ",
+    "Found",                          "Found ",
+    "GC footer",                      "GC footer",
+    "GC navigation bar",              "GC navigation bar",
+    "image",                          "image",
+    "images",                         "images",
+    "in",                             " in ",
+    "in URL",                         " in URL ",
+    "Invalid anchor text",            "Invalid anchor text ",
+    "Invalid href",                   "Invalid 'href' ",
     "is not equal to last level",     " is not equal to last level ",
-    "Displayed e-mail address does not match mailto",  "Displayed e-mail address does not match 'mailto'",
+    "link",                           "link",
+    "links",                          "links",
+    "Missing content section markers for", "Missing content section markers for ",
+    "Missing images in",              "Missing images in",
+    "Missing links in",               "Missing links in",
+    "New heading level",              "New heading level ",
+    "or",                             " or ",
     "Multiple <h1> tags found in section", "Multiple <h1> tags found in section",
     "Missing favicon",                 "Missing 'favicon'",
     "Missing URL in href for favicon", "Missing URL in href for 'favicon'",
@@ -8899,6 +8899,12 @@ sub Destroy_Text_Handler {
                 #
                 print "Not adding <script> text to text handler\n" if $debug;
             }
+            elsif ( $tag eq "style" ) {
+                #
+                # Don't add style tag text parent.
+                #
+                print "Not adding <style> text to text handler\n" if $debug;
+            }
             else {
                 #
                 # Add text from this tag to the previous tag's text handler
@@ -9879,6 +9885,54 @@ sub End_Script_Tag_Handler {
 
 #***********************************************************************
 #
+# Name: Style_Tag_Handler
+#
+# Parameters: self - reference to this parser
+#             line - line number
+#             column - column number
+#             text - text from tag
+#             attr - hash table of attributes
+#
+# Description:
+#
+#   This function handles the style tag.
+#
+#***********************************************************************
+sub Style_Tag_Handler {
+    my ( $self, $line, $column, $text, %attr ) = @_;
+
+    #
+    # Start a text handler for the <style> text
+    #
+    Start_Text_Handler($self, "style");
+}
+
+#***********************************************************************
+#
+# Name: End_Style_Tag_Handler
+#
+# Parameters: self - reference to this parser
+#             line - line number
+#             column - column number
+#             text - text from tag
+#             attr - hash table of attributes
+#
+# Description:
+#
+#   This function handles the end style tag.
+#
+#***********************************************************************
+sub End_Style_Tag_Handler {
+    my ( $self, $line, $column, $text, %attr ) = @_;
+
+    #
+    # Destroy a text handler for the <style> text
+    #
+    Destroy_Text_Handler($self, "style");
+}
+
+#***********************************************************************
+#
 # Name: Anchor_Tag_Handler
 #
 # Parameters: self - reference to this parser
@@ -10262,6 +10316,12 @@ sub Start_Handler {
     elsif ( $tagname eq "script" ) {
         Script_Tag_Handler($self, $line, $column, $text, %attr_hash);
     }
+    #
+    # Check for style tag
+    #
+    elsif ( $tagname eq "style" ) {
+        Style_Tag_Handler($self, $line, $column, $text, %attr_hash);
+    }
 
 }
 
@@ -10394,6 +10454,12 @@ sub End_Handler {
     #
     elsif ( $tagname eq "script" ) {
         End_Script_Tag_Handler( $self, $line, $column, $text, %attr_hash );
+    }
+    #
+    # Check style tag
+    #
+    elsif ( $tagname eq "style" ) {
+        End_Style_Tag_Handler( $self, $line, $column, $text, %attr_hash );
     }
 
     #
@@ -10903,10 +10969,16 @@ sub Check_Link_Anchor_and_Href {
 
     #
     # Does the href text match what is expected ?
+    # Skip the check if this is just an on page id reference
+    # (e.g. <a href="#id_value"> ...)
     #
     $href = $link->abs_url;
     $match = 0;
-    if ( defined($href) ) {
+    if ( $link->on_page_id_reference ) {
+        $match = 1;
+        print "On page id reference link\n";
+    }
+    elsif ( defined($href) ) {
         foreach $href_value (@$expected_href) {
             print "Check link href \"" . $href .
                   "\" versus \"$href_value\"\n" if $debug;
@@ -11574,10 +11646,18 @@ sub Compare_Link_Lists {
             }
             
             #
-            # Do the href values match ?
+            # Do the href values match ? If this is an on page
+            # reference, use the href value rather than the absolute
+            # URL value (page qualified).
             #
-            $actual_text = $link->abs_url;
-            $expected_text = $link1->abs_url;
+            if ( $link->on_page_id_reference ) {
+                $actual_text = $link->href;
+                $expected_text = $link1->href;
+            }
+            else {
+                $actual_text = $link->abs_url;
+                $expected_text = $link1->abs_url;
+            }
             print "Check link href \"" . $actual_text .
                   "\" versus \"$expected_text\"\n" if $debug;
             if ( $actual_text ne $expected_text ) {
@@ -12666,17 +12746,20 @@ sub Match_Link_Anchor_and_Href {
     if ( lc($anchor_text) eq lc($expected_anchor) ) {
         #
         # Does the href text match what is expected ?
+        # Skip check for on page id references
         #
+        if ( ! $link->on_page_id_reference ) {
         $href = $link->abs_url;
-        print "Check link href \"" . $href .
-              "\" versus \"$expected_href\"\n" if $debug;
-        if ( ($expected_href ne "") && ($href ne $expected_href) ) {
-            $message = String_Value("Invalid href") .
-                        "'" . $href . "'" .
-                        String_Value("in") . " $section " . " " . 
-                        String_Value("expecting") . "'" . $expected_href . "'";
-            Record_Result($tcid, $link->line_no, $link->column_no,
-                          $link->source_line, $message);
+            print "Check link href \"" . $href .
+                  "\" versus \"$expected_href\"\n" if $debug;
+            if ( ($expected_href ne "") && ($href ne $expected_href) ) {
+                $message = String_Value("Invalid href") .
+                            "'" . $href . "'" .
+                            String_Value("in") . " $section " . " " .
+                            String_Value("expecting") . "'" . $expected_href . "'";
+                Record_Result($tcid, $link->line_no, $link->column_no,
+                              $link->source_line, $message);
+            }
         }
 
         #
@@ -13457,7 +13540,7 @@ sub Check_Skip_Links {
         #
         # Do we have the expected number of links ?
         #
-        if ( $link_count != $href_count ) {
+        if ( $link_count < $href_count ) {
             Record_Result("SWU_TEMPLATE", -1, -1, "",
                           String_Value("Missing links in") . " SKIP_LINKS. " .
                           String_Value("Found") . " $link_count " .
@@ -13471,8 +13554,8 @@ sub Check_Skip_Links {
             # between WET 2.3 and 3.0).
             #
             $i = 0;
-            foreach $link (@links) {
-                $href = $$skip_links_hrefs[$i];
+            foreach $href (@$skip_links_hrefs) {
+                $link = $links[$i];
 
                 #
                 # Split href value on white space in case there are several

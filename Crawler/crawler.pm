@@ -3417,9 +3417,9 @@ return 1;
 #
 # Name: crawler.pm
 #
-# $Revision: 7184 $
+# $Revision: 7573 $
 # $URL: svn://10.36.21.45/trunk/Web_Checks/Crawler/Tools/crawler.pm $
-# $Date: 2015-06-29 03:02:50 -0400 (Mon, 29 Jun 2015) $
+# $Date: 2016-05-25 08:03:22 -0400 (Wed, 25 May 2016) $
 #
 # Description:
 #
@@ -3428,6 +3428,7 @@ return 1;
 #
 # Public functions:
 #     Crawler_Decode_Content
+#     Crawler_Get_Generated_Content
 #     Crawler_Uncompress_Content_File
 #     Crawler_Read_Content_File
 #     Crawler_Abort_Crawl
@@ -3484,6 +3485,7 @@ use strict;
 use Sys::Hostname;
 use LWP::RobotUA;
 use LWP::UserAgent;
+use LWP::ConnCache;
 use HTTP::Cookies;
 use URI::URL;
 use File::Basename;
@@ -3498,6 +3500,8 @@ if ( $have_threads ) {
     $have_threads = eval 'use threads::shared; 1';
 }
 use File::Temp qw/ tempfile tempdir /;
+use File::Path qw(make_path remove_tree);
+use IO::Socket::SSL qw( SSL_VERIFY_NONE );
 
 #***********************************************************************
 #
@@ -3510,6 +3514,7 @@ BEGIN {
 
     @ISA     = qw(Exporter);
     @EXPORT  = qw(Crawler_Decode_Content
+                  Crawler_Get_Generated_Content
                   Crawler_Uncompress_Content_File
                   Crawler_Read_Content_File
                   Crawler_Abort_Crawl
@@ -3545,9 +3550,9 @@ my ($http_response_callback_function, $login_callback_function);
 my ($loginpagee, $logoutpagee, $loginpagef, $logoutpagef, @login_url_patterns);
 my ($login_form_name, $http_401_callback_function, %http_401_credentials);
 my ($login_domain_e, $login_domain_f, $accepted_content_encodings);
-my (%domain_prod_dev_map, %domain_dev_prod_map);
+my (%domain_prod_dev_map, %domain_dev_prod_map, $RobotUA_cache_dir, $tmp);
 my ($login_interstitial_count, $logout_interstitial_count, $user_agent_hostname);
-my ($charset, $lwp_user_agent, $content_length);
+my ($charset, $lwp_user_agent, $content_length, $phantomjs_cookie_file);
 
 #
 # Shared variables for use between treads
@@ -3585,6 +3590,11 @@ sub Set_Crawler_Debug {
     # Copy debug value to global variable
     #
     $debug = $this_debug;
+    
+    #
+    # Set debug flag in supporting modules
+    #
+    Crawler_Phantomjs_Debug($debug);
 }
 
 #***********************************************************************
@@ -3706,6 +3716,11 @@ sub Crawler_Config {
             $user_agent_content_file = $value;
         }
     }
+    
+    #
+    # Pass configuration values to the PhantomJS module
+    #
+    Crawler_Phantomjs_Config(%config_vars);
 }
 
 #***********************************************************************
@@ -3735,7 +3750,6 @@ sub Set_Crawler_Content_Callback {
     # Save the callback function
     #
     $content_callback_function = $local_content_callback_function;
-
 }
 
 #***********************************************************************
@@ -3760,7 +3774,6 @@ sub Set_Crawler_Domain_Alias_Map {
     # Save domain alias map
     #
     %domain_alias_map = %local_domain_alias_map;
-
 }
 
 #***********************************************************************
@@ -3851,7 +3864,6 @@ sub Set_Crawler_HTTP_Response_Callback {
     # Save the callback function
     #
     $http_response_callback_function = $local_http_response_callback_function;
-
 }
 
 #***********************************************************************
@@ -3882,7 +3894,6 @@ sub Set_Crawler_HTTP_401_Callback {
     # Save the callback function
     #
     $http_401_callback_function = $local_http_401_callback_function;
-
 }
 
 #***********************************************************************
@@ -4129,15 +4140,37 @@ sub HTML_Charset {
 sub Crawler_Decode_Content {
     my ($resp) = @_;
 
-    my ($content, $header);
+    my ($content, $header, $filename, $line);
 
     #
-    # Get content with no charset decoding.
+    # Do we have a valid HTTP::Response object ?
     #
     print "Crawler_Decode_Content\n" if $debug;
     if ( ! defined($resp) ) {
         return("");
     }
+    
+    #
+    # Have we saved the content in a file rather than the content
+    # attribute of the HTTP::Response object ?
+    #
+    if ( defined($resp->header("WPSS-Content-File")) ) {
+        $filename = $resp->header("WPSS-Content-File");
+        print "Read content from $filename\n" if $debug;
+        open(CONTENT, $filename);
+        binmode CONTENT;
+        $content = "";
+        while ( $line = <CONTENT> ) {
+            $content .= $line;
+        }
+        close(CONTENT);
+        return($content);
+    }
+
+    #
+    # Get content with no charset decoding.
+    #
+    print "Get content from HTTP::Response object\n" if $debug;
     $content = $resp->decoded_content(charset => 'none');
 
     #
@@ -4162,6 +4195,71 @@ sub Crawler_Decode_Content {
             }
         }
     }
+
+    #
+    # Return content
+    #
+    return($content);
+}
+
+#***********************************************************************
+#
+# Name: Crawler_Get_Generated_Content
+#
+# Parameters: resp - HTTP::Response object
+#             url - URL of page
+#             image_file - name of file to contain screen capture
+#               of web page
+#
+# Description:
+#
+#   This function gets the HTML markup of the page.  If the URL is a text/html
+# page, an attempt is made to get the full markup after initial JavaScript
+# code is run.  If the page is not text/html, or the JavaScript cannot be
+# run, the markup is taken from the HTTP::Response object.
+#
+#***********************************************************************
+sub Crawler_Get_Generated_Content {
+    my ($resp, $url, $image_file) = @_;
+
+    my ($markup, $header, $content);
+
+    #
+    # Do we have a valid HTTP::Response object ?
+    #
+    print "Crawler_Decode_Content\n" if $debug;
+    if ( ! defined($resp) ) {
+        return("");
+    }
+
+    #
+    # Check for text/html mime type.  If we find it, use
+    # PhantomJS to get the markup after applying onload
+    # JavaScript
+    #
+    $header = $resp->headers;
+    if ( $header->content_type =~ /text\/html/ ) {
+        #
+        # Get page markup
+        #
+        print "Get content using PhantomJS\n" if $debug;
+        $markup = Crawler_Phantomjs_Page_Markup($url, $phantomjs_cookie_file,
+                                                 $image_file);
+
+        #
+        # Did we get content ?
+        #
+        if ( defined($$markup{"generated_content"}) &&
+             ($$markup{"generated_content"} ne "") ) {
+            return($$markup{"generated_content"});
+        }
+    }
+
+    #
+    # Either page is not text/html, or we failed to get it.
+    # Get the content from the HTTP::Response object.
+    #
+    $content = Crawler_Decode_Content($resp);
 
     #
     # Return content
@@ -4203,7 +4301,9 @@ sub Crawler_Uncompress_Content_File {
         #
         # Get a new temporary file
         #
-        (undef, $new_filename) = tempfile(OPEN => 0);
+        (undef, $new_filename) = tempfile("WPSS_TOOL_XXXXXXXXXX", OPEN => 0,
+                                          TMPDIR => 1);
+        print "Temporary file for uncompressed content $new_filename\n" if $debug;
         
         #
         # Uncompress the content
@@ -4217,6 +4317,7 @@ sub Crawler_Uncompress_Content_File {
         }
         else {
             print "Error: Crawler_Uncompress_Content_File failed to gunzip $filename, error = $GunzipError\n";
+            unlink($new_filename);
         }
     }
 
@@ -4297,7 +4398,8 @@ sub Create_User_Agents {
     #
     # Local variables
     #
-    my ($cookie_jar, $host);
+    my ($cookie_jar, $host, $fh, $cache);
+    my $num_connections = 10;
 
     #
     # Get hostname if we were not given one in the configuration options.
@@ -4308,15 +4410,47 @@ sub Create_User_Agents {
     else {
         $host = $user_agent_hostname;
     }
+    
+    #
+    # Does the cache exist ?
+    #
+    if ( -d $RobotUA_cache_dir ) {
+        #
+        # Remove files
+        #
+        print "Remove existing cache content from $RobotUA_cache_dir\n" if $debug;
+        remove_tree($RobotUA_cache_dir) ||
+          die "Error: Failed to remove cache content from $RobotUA_cache_dir\n";
+    }
+    
+    #
+    # Create disk cache
+    #
+    print "Create disk cache at $RobotUA_cache_dir\n" if $debug;
+    mkdir($RobotUA_cache_dir, 0755) ||
+      die "Error: Failed to create cache directory $RobotUA_cache_dir\n";
 
     #
     # Setup user agent to handle HTTP requests
     #
-    print "Create LWP::RobotUA user agent $user_agent_name\n" if $debug;
-    $user_agent = LWP::RobotUA->new("$user_agent_name", "$user_agent_name\@$host");
-    $user_agent->ssl_opts(verify_hostname => 0);
+    print "Create LWP::RobotUA::Cached user agent $user_agent_name\n" if $debug;
+    $user_agent = LWP::RobotUA::Cached->new(agent => "$user_agent_name",
+                                            from => "$user_agent_name\@$host",
+                                            cache_dir => "$RobotUA_cache_dir",
+                                            cachename_spec => {'Client-Date' => '',
+                                                               'Referer' => ''});
+
+    $user_agent->ssl_opts(verify_hostname => 0,
+                          SSL_verify_mode => SSL_VERIFY_NONE);
     $user_agent->timeout("60");
     $user_agent->delay(1/120);
+    
+    #
+    # Set connection caching
+    #
+    $cache = LWP::ConnCache->new;
+    $cache->total_capacity([$num_connections]);
+    $user_agent->conn_cache($cache);
 
     #
     # Set maximum document size
@@ -4329,7 +4463,7 @@ sub Create_User_Agents {
     # Create a temporary cookie jar for the user agent.
     #
     $cookie_jar = HTTP::Cookies->new;
-    $user_agent->cookie_jar( $cookie_jar );
+    $user_agent->cookie_jar($cookie_jar);
 
     #
     # Get list of acceptable encodings that this Perl installation
@@ -4343,7 +4477,8 @@ sub Create_User_Agents {
     #
     print "Create LWP::UserAgent user agent $user_agent_name\n" if $debug;
     $lwp_user_agent = LWP::UserAgent->new("$user_agent_name");
-    $lwp_user_agent->ssl_opts(verify_hostname => 0);
+    $lwp_user_agent->ssl_opts(verify_hostname => 0,
+                              SSL_verify_mode => SSL_VERIFY_NONE);
     $lwp_user_agent->timeout("60");
 
     #
@@ -4357,9 +4492,12 @@ sub Create_User_Agents {
     # Create a temporary cookie jar for the user agent.
     #
     $cookie_jar = HTTP::Cookies->new;
-    $lwp_user_agent->cookie_jar( $cookie_jar );
+    $lwp_user_agent->cookie_jar($cookie_jar);
 
-
+    #
+    # Clear PhantomJS disk cache and cookie jar
+    #
+    Crawler_Phantomjs_Clear_Cache($phantomjs_cookie_file);
 }
 
 #***********************************************************************
@@ -4832,6 +4970,7 @@ sub Crawler_Get_HTTP_Response {
     my ($user, $password, $realm, $url, $header, $redirect_domain);
     my ($redirect_protocol, $protocol, $host, $path, $query, $port);
     my ($redirect_file_path, $redirect_query, $redirect_dir, $new_url);
+    my ($sec, $min, $hour, $date, $set_credentials);
     my ($redirect_count) = 0;
     my ($http_401_count) = 0;
     my ($done) = 0;
@@ -4839,7 +4978,7 @@ sub Crawler_Get_HTTP_Response {
     my ($use_simple_request) = 1;
 
     #
-    # Do we have a  user agent ?
+    # Do we have a user agent ?
     #
     if ( ! defined($user_agent) ) {
         Create_User_Agents();
@@ -4864,10 +5003,13 @@ sub Crawler_Get_HTTP_Response {
     }
 
     #
-    # Are we saving the content in a file ?
+    # Are we saving the content in a file ? This only works with an
+    # LWP::UserAgent object, not a LWP::RobotUA::Cached object.
     #
     if ( $user_agent_content_file ) {
-        (undef, $filename) = tempfile(OPEN => 0);
+        (undef, $filename) = tempfile("WPSS_TOOL_XXXXXXXXXX", OPEN => 0,
+                                      TMPDIR => 1);
+        print "Set temporary content file name $filename\n" if $debug;
         $content_length = 0;
         $lwp_user_agent->remove_handler("response_data");
         $lwp_user_agent->add_handler("response_data" => \&HTTP_Response_Data_Callback);
@@ -4875,10 +5017,17 @@ sub Crawler_Get_HTTP_Response {
     }
 
     #
+    # Get current time/date
+    #
+    ($sec, $min, $hour) = (localtime)[0,1,2];
+    $date = sprintf("%02d:%02d:%02d", $hour, $min, $sec);
+
+    #
     # Loop, following redirects, until we have the web document
     #
     $url = $this_url;
-    print "GET url = $url, Referrer = $referer_url\n" if $debug;
+    $set_credentials = 0;
+    print "GET start $date url = $url, Referrer = $referer_url\n" if $debug;
     while ( ! $done ) {
 
         #
@@ -4889,7 +5038,16 @@ sub Crawler_Get_HTTP_Response {
         $req->header("Accept" => "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
         $req->header("Pragma" => "no-cache");
         $req->header("Cache-Control" => "no-cache");
-        $req->header("Connection" => "keep-alive");
+        $req->header("Connection" => "Keep-Alive");
+        
+        #
+        # Do we set credentials on this request ?
+        #
+        if ( $set_credentials && defined($user) ) {
+            print "Add username and password credentials\n" if $debug;
+            $req->authorization_basic($user, $password);
+            $set_credentials = 0;
+        }
 
         #
         # Add accepted content encodings
@@ -4930,7 +5088,6 @@ sub Crawler_Get_HTTP_Response {
             #
             if ( $user_agent_content_file ) {
                 print "Use LWP::UserAgent to get content in file $filename\n" if $debug;
-                #$lwp_user_agent->prepare_request($req);
                 unlink($filename);
                 open(HTTP_FH, ">$filename");
                 binmode HTTP_FH;
@@ -4939,7 +5096,6 @@ sub Crawler_Get_HTTP_Response {
             }
             else {
                 print "Use LWP::RobotUA to get content\n" if $debug;
-                #$user_agent->prepare_request($req);
                 $resp = $user_agent->request($req);
             }
         }
@@ -5061,7 +5217,6 @@ sub Crawler_Get_HTTP_Response {
                             print "Add login credentials to user agent (user=$user, password=$password, host=$host:$port, realm=$realm)\n" if $debug;
                             $user_agent->credentials("$host:$port", "$realm",
                                                      "$user", "$password");
-
                             $http_401_credentials{$path} = 1;
 
                             #
@@ -5070,6 +5225,7 @@ sub Crawler_Get_HTTP_Response {
                             # request will fail, we must do a full request.
                             #
                             $use_simple_request = 0;
+                            $set_credentials = 1;
                         }
                         else {
                             #
@@ -5185,7 +5341,15 @@ sub Crawler_Get_HTTP_Response {
                 # Did the URL look like a valid URL ?
                 #
                 if ( $redirect_protocol eq "" ) {
-                    print "Invalid URL provided in redirect, $url\n" if $debug;
+                    $date = sprintf("%02d:%02d:%02d", $hour, $min, $sec);
+                    print "Crawler_Get_HTTP_Response end   $date Invalid URL provided in redirect, $url\n" if $debug;
+
+                    #
+                    # Do we have a temporary content file ?
+                    #
+                    if ( defined($filename) ) {
+                        unlink($filename);
+                    }
                     return ($url, $resp);
                 }
 
@@ -5195,6 +5359,13 @@ sub Crawler_Get_HTTP_Response {
                 if ( $redirect_count >= $max_redirects ) {
                     $done = 1;
                     print "Aborting GET, too many redirects\n" if $debug;
+
+                    #
+                    # Do we have a temporary content file ?
+                    #
+                    if ( defined($filename) ) {
+                        unlink($filename);
+                    }
                 }
             }
             else {
@@ -5207,6 +5378,13 @@ sub Crawler_Get_HTTP_Response {
                     $http_error = $resp->status_line;
                     print "Error accessing URL, code is $http_error_code\n";
                     print "                     Error is $http_error\n";
+                    
+                    #
+                    # Do we have a temporary content file ?
+                    #
+                    if ( defined($filename) ) {
+                        unlink($filename);
+                    }
                 }
             }
         }
@@ -5228,7 +5406,15 @@ sub Crawler_Get_HTTP_Response {
             }
         }
     }
-    print "GET url response = $url, Referrer = $referer_url\n" if $debug;
+    ($sec, $min, $hour) = (localtime)[0,1,2];
+    $date = sprintf("%02d:%02d:%02d", $hour, $min, $sec);
+    print "Crawler_Get_HTTP_Response end   $date GET\n" if $debug;
+    
+    #
+    # Make sure the response URL is properly formatted
+    #
+    $url = url($url, $url)->abs;
+    print "Response URL = $url\n" if $debug;
 
     #
     # Return the response object
@@ -5319,7 +5505,6 @@ sub Correct_Link_Format {
     # Return list of filtered links
     #
     return(keys %filtered_links);
-
 }
 
 #***********************************************************************
@@ -5387,7 +5572,6 @@ sub Correct_Link_Domain_Language {
     # Return list of filtered links
     #
     return(keys %filtered_links);
-
 }
 
 #***********************************************************************
@@ -6031,7 +6215,7 @@ sub Call_Callback_Functions {
     #
     if ( defined($content_callback_function) ) {
         print "Call http content callback function\n" if $debug;
-        $content = Crawler_Decode_Content($resp);
+        $content = Crawler_Decode_Content($resp, $url);
         if ( &$content_callback_function($url,
              $referer_url, $content_type, $content) == 1 ) {
             #
@@ -6072,7 +6256,7 @@ sub Submit_To_Interstitial_Page {
     #
     # Check for UTF-8 content
     #
-    $content = Crawler_Decode_Content($resp);
+    $content = Crawler_Decode_Content($resp, $referer_url);
 
     #
     # Parse forms from content of interstitial page
@@ -6583,6 +6767,7 @@ sub Get_Robots_Txt_Details {
 # Name: Content_Checksum
 #
 # Parameters: resp - HTTP::Response object
+#             url - URL of page
 #
 # Description:
 #
@@ -6594,7 +6779,7 @@ sub Get_Robots_Txt_Details {
 #
 #***********************************************************************
 sub Content_Checksum {
-    my ($resp) = @_;
+    my ($resp, $url) = @_;
 
     my ($checksum, $content, $header, $content_type);
 
@@ -6607,7 +6792,7 @@ sub Content_Checksum {
     #
     # Check for UTF-8 content
     #
-    $content = Crawler_Decode_Content($resp);
+    $content = Crawler_Decode_Content($resp, $url);
 
     #
     # Determine content type
@@ -6852,14 +7037,14 @@ sub Crawl_Site {
             # 
             # Do we already have this URL in the list ?
             # 
-            if ( defined($url_list_map{$url}) ) {
+            if ( defined($url_list_map{$rewritten_url}) ) {
                 next;
             } 
 
             #
             # Get checksum for the content
             #
-            $checksum = Content_Checksum($resp);
+            $checksum = Content_Checksum($resp, $url);
 
             #
             # Have we seen a document with the same checksum before ?
@@ -6872,7 +7057,7 @@ sub Crawl_Site {
             }
             else {
                 $url_checksum_map{$checksum} = $rewritten_url;
-                $url_checksum_map{$checksum} = $url;
+                #$url_checksum_map{$checksum} = $url;
                 $url_list_map{$rewritten_url} = $crawl_depth;
             }
 
@@ -6885,8 +7070,8 @@ sub Crawl_Site {
             # Add URL and its attributes to the lists.
             #
             $header = $resp->headers;
-            push (@$url_list, $url);
-            $url_list_map{$url} = $crawl_depth;
+            push (@$url_list, $rewritten_url);
+            $url_list_map{$rewritten_url} = $crawl_depth;
             $content_type = $header->content_type;
             push (@$url_type, $content_type);
 
@@ -6913,7 +7098,7 @@ sub Crawl_Site {
             #
             # Call http response or content callbacks.
             #
-            if ( ! Call_Callback_Functions($url,
+            if ( ! Call_Callback_Functions($rewritten_url,
                       $url_referer_map{$url}, $resp) ) {
                     #
                     # Exit crawler
@@ -6942,7 +7127,7 @@ sub Crawl_Site {
             #
             # Check for UTF-8 content
             #
-            $content = Crawler_Decode_Content($resp);
+            $content = Crawler_Decode_Content($resp, $rewritten_url);
 
             #
             # If this document is of type 'text/html', we can extract
@@ -6960,7 +7145,7 @@ sub Crawl_Site {
                 }
                 else {
                     #
-                    # Determine the abse URL for any relative URLs.  Usually 
+                    # Determine the base URL for any relative URLs.  Usually
                     # this is the base field from the HTTP Response object
                     # (Location field in HTTP packet).  If the response code
                     # is 200 (OK), we don't use the the base field in case 
@@ -7076,7 +7261,8 @@ sub Crawl_Site {
 sub Import_Packages {
 
     my ($package);
-    my (@package_list) = ("extract_links", "textcat", "url_check");
+    my (@package_list) = ("extract_links", "textcat", "url_check",
+                          "crawler_phantomjs", "LWP/RobotUA/Cached");
 
     #
     # Import packages, we don't use a 'use' statement as these packages
@@ -7091,7 +7277,6 @@ sub Import_Packages {
         }
         $package->import();
     }
-
 }
 
 #***********************************************************************
@@ -7128,6 +7313,23 @@ if ( $program_dir eq "." ) {
 # Import required packages
 #
 Import_Packages;
+
+#
+# Get path for cache and cookie jars
+#
+if ( $^O =~ /MSWin32/ ) {
+    #
+    # Windows.
+    #
+    $tmp = $ENV{"TMP"};
+} else {
+    #
+    # Not Windows.
+    #
+    $tmp = $ENV{"HOME"};
+}
+$RobotUA_cache_dir = "$tmp/wpss_tool_RobotUA_cache";
+$phantomjs_cookie_file = "$tmp/phantomjs_cookies.txt";
 
 #
 # Return true to indicate we loaded successfully

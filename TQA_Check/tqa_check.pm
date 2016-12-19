@@ -2477,9 +2477,9 @@ return 1;
 #
 # Name:   tqa_check.pm
 #
-# $Revision: 7022 $
+# $Revision: 7556 $
 # $URL: svn://10.36.21.45/trunk/Web_Checks/TQA_Check/Tools/tqa_check.pm $
-# $Date: 2015-03-05 11:39:00 -0500 (Thu, 05 Mar 2015) $
+# $Date: 2016-03-30 08:23:57 -0400 (Wed, 30 Mar 2016) $
 #
 # Description:
 #
@@ -2608,7 +2608,7 @@ my %string_table_en = (
     "Image first found in URL",       "Image first found in URL ",
     "Image URL in decorative list",   "Image URL found in decorative image list",
     "Image URL in non-decorative list", "Image URL found in non-decorative image list",
-    "in decorative image",            "in decorative image.",
+    "in decorative image",            "in decorative image. ",
     "in non-decorative image",        "in non-decorative image",
     "in URL",                         " in URL ",
     "in",                             " in ",
@@ -2616,7 +2616,7 @@ my %string_table_en = (
     "Missing alt attribute in decorative image", "Missing alt attribute in decorative image. ",
     "Navigation link",                "Navigation link ",
     "Non null alt text",              "Non null 'alt' text",
-    "Non null title text",            "Non null 'title' text",
+    "Non null text alternative",      "Non null text alternative",
     "Non null",                       "Non null",
     "Non-decorative image loaded via CSS", "Non-decorative image loaded via CSS. ",
     "out of order, should precede",   " out of order, should precede ",
@@ -2640,7 +2640,7 @@ my %string_table_fr = (
     "Image first found in URL",       "Image d'abord trouvé dans les URL ",
     "Image URL in decorative list",   "URL de l'image son trouvé dans la liste des images décoratives.",
     "Image URL in non-decorative list", "URL de l'image son trouvé dans la liste des images non décoratives.",
-    "in decorative image",            "dans l'image décoratives.",
+    "in decorative image",            "dans l'image décoratives. ",
     "in non-decorative image",        "dans l'image non-décoratives.",
     "in URL",                         " dans URL ",
     "in",                             " dans ",
@@ -2648,7 +2648,7 @@ my %string_table_fr = (
     "Missing alt attribute in decorative image", "Attribut alt manquant dans l'image décoratives. ",
     "Navigation link",                "Lien de navigation ",
     "Non null alt text",              "Non le texte 'alt' nuls",
-    "Non null title text",            "Non le texte 'title' nuls",
+    "Non null text alternative",      "Non nulle texte alternatif",
     "Non null",                       "Non nuls",
     "Non-decorative image loaded via CSS", "Non-décorative image chargée via CSS. ",
     "out of order, should precede",   " de l'ordre, doit précéder ",
@@ -2679,6 +2679,7 @@ sub Set_TQA_Check_Debug {
     # Set other debug flags
     #
     Set_CSS_Check_Debug($this_debug);
+    Set_EPUB_Check_Debug($this_debug);
     Set_JavaScript_Check_Debug($this_debug);
     PDF_Check_Debug($this_debug);
     TQA_Testcase_Debug($this_debug);
@@ -2732,6 +2733,7 @@ sub Set_TQA_Check_Language {
     # Set CSS and JavaScript TQA Language
     #
     Set_CSS_Check_Language($language);
+    Set_EPUB_Check_Language($language);
     Set_JavaScript_Check_Language($language);
     Set_PDF_Check_Language($language);
     Set_HTML_Check_Language($language);
@@ -2809,6 +2811,7 @@ sub Set_TQA_Check_Testcase_Data {
     # Set CSS and JavaScript Check test case data
     #
     Set_CSS_Check_Testcase_Data($testcase, $data);
+    Set_EPUB_Check_Testcase_Data($testcase, $data);
     Set_JavaScript_Check_Testcase_Data($testcase, $data);
     Set_PDF_Check_Testcase_Data($testcase, $data);
     Set_HTML_Check_Testcase_Data($testcase, $data);
@@ -2844,6 +2847,7 @@ sub Set_TQA_Check_Test_Profile {
     # Set CSS and JavaScript Check test case profiles
     #
     Set_CSS_Check_Test_Profile($profile, $tqa_checks);
+    Set_EPUB_Check_Test_Profile($profile, $tqa_checks);
     Set_JavaScript_Check_Test_Profile($profile, $tqa_checks);
     Set_PDF_Check_Test_Profile($profile, $tqa_checks);
     Set_HTML_Check_Test_Profile($profile, $tqa_checks);
@@ -2886,6 +2890,7 @@ sub Set_TQA_Check_Valid_Markup {
     # Clear existing validity flags
     #
     Set_HTML_Check_Valid_Markup(1);
+    Set_EPUB_Check_Valid_Markup(1);
     Set_CSS_Check_Valid_Markup(1);
     Set_JavaScript_Check_Valid_Markup(1);
     Set_XML_Check_Valid_Markup(1);
@@ -2897,14 +2902,19 @@ sub Set_TQA_Check_Valid_Markup {
         #
         # Check mime type
         #
-        if ( $mime_type =~ "text\/html" ) {
-            Set_HTML_Check_Valid_Markup($validity);
-        }
-        elsif ( $mime_type =~ "text\/css" ) {
+        if ( $mime_type =~ "text\/css" ) {
             Set_CSS_Check_Valid_Markup($validity);
         }
+        elsif ( ($mime_type =~ /application\/epub\+zip/) ||
+                ($this_url =~ /\.epub$/i) ) {
+            Set_EPUB_Check_Valid_Markup($validity);
+        }
+        elsif ( $mime_type =~ "text\/html" ) {
+            Set_HTML_Check_Valid_Markup($validity);
+        }
         elsif ( ($mime_type =~ "application\/x-javascript") ||
-                ($mime_type =~ "text\/javascript") ) {
+                ($mime_type =~ "text\/javascript") ||
+                ($this_url =~ /\.js$/i) ) {
             Set_JavaScript_Check_Valid_Markup($validity);
         }
         elsif ( ($mime_type =~ /application\/atom\+xml/) ||
@@ -3116,7 +3126,7 @@ sub TQA_Check {
     my ($this_url, $language, $profile, $mime_type, $resp, 
         $content, $links) = @_;
 
-    my ($extracted_content, @tqa_results_list, $do_tests);
+    my ($extracted_content, @tqa_results_list, $do_tests, $tcid);
     my (@other_tqa_results_list, $result_object, $fault_count);
 
     #
@@ -3142,9 +3152,24 @@ sub TQA_Check {
     }
 
     #
+    # Is it CSS content?
+    #
+    if ( $mime_type =~ /text\/css/ ) {
+        @tqa_results_list = CSS_Check($this_url, $language, $profile,
+                                      $content);
+    }
+    #
+    # Is it EPUB content?
+    #
+    if ( ($mime_type =~ /text\/epub\+zip/) ||
+         ($this_url =~ /\.epub$/) ) {
+        @tqa_results_list = EPUB_Check($this_url, $language, $profile,
+                                      $content);
+    }
+    #
     # Is it HTML content?
     #
-    if ( $mime_type =~ /text\/html/ ) {
+    elsif ( $mime_type =~ /text\/html/ ) {
         @tqa_results_list = HTML_Check($this_url, $language, $profile,
                                        $resp, $content, $links);
         $fault_count = @tqa_results_list;
@@ -3193,13 +3218,6 @@ sub TQA_Check {
                 push(@tqa_results_list, $result_object);
             }
         }
-    }
-    #
-    # Is it CSS content?
-    #
-    elsif ( $mime_type =~ /text\/css/ ) {
-        @tqa_results_list = CSS_Check($this_url, $language, $profile,
-                                      $content);
     }
     #
     # Is it JavaScript content?
@@ -3255,6 +3273,16 @@ sub TQA_Check {
     # Check for errors using the HTTP::Response object
     #
     Check_HTTP_Response($this_url, $resp);
+
+    #
+    # Add help URL to result
+    #
+    foreach $result_object (@tqa_results_list) {
+        $tcid = $result_object->testcase();
+        if ( defined(TQA_Testcase_URL($tcid)) ) {
+            $result_object->help_url(TQA_Testcase_URL($tcid));
+        }
+    }
 
     #
     # Return list of results
@@ -3417,7 +3445,7 @@ sub Is_Substring {
 sub Check_Link_Anchor_Alt_Title_Check {
     my ($url, $profile, @links) = @_;
 
-    my ($link, $string1, $string2);
+    my ($link, $string1, $string2, %g197_reported);
     my ($lang, $anchor, $title, $alt, $link_url, $referer_url);
     my ($url_link_object_table, $previous_link, $different);
     my ($difference, $line_no, $column_no, $link_type);
@@ -3447,13 +3475,45 @@ sub Check_Link_Anchor_Alt_Title_Check {
             $in_list = $link->in_list;
             $list_heading = $link->list_heading;
             print "Check link anchor = \"$anchor\", lang = $lang, alt = \"$alt\" url = $link_url at $line_no:$column_no\n" if $debug;
-            
+
             #
             # Is this a <input type="image" ? If so we skip it as any alt
             # or title attribute belong to the input not the image.
             #
             if ( $link_type eq "input" ) {
                 print "Skip input type=image\n" if $debug;
+                next;
+            }
+            
+            #
+            # If this is an anchor where the href is JavaScript, we skip it
+            #
+            if ( ($link_type eq "a") && ($link_url =~ /^\s*javascript\s*:/i) ) {
+                print "Skip JavaScript link\n" if $debug;
+                next;
+            }
+
+            #
+            # If this is an on page id reference and the href value is "#",
+            # we skip it.  JavaScript may be being used to control
+            # the behaviour.
+            #
+            if ( ($link_type eq "a") &&
+                 ($link->on_page_id_reference) &&
+                 ($link->href eq "#") ) {
+                print "Skip on page link to #\n" if $debug;
+                next;
+            }
+
+            #
+            # Is this an image link inside an anchor ? If so the
+            # same image may be used for multiple links, each with
+            # different alt text as the links serve different
+            # purposes (e.g. using a calendar image to open
+            # a calendar widget in a form).
+            #
+            if ( ($link_type eq "img") && $link->in_anchor ) {
+                print "Skip image inside anchor\n" if $debug;
                 next;
             }
 
@@ -3599,12 +3659,16 @@ sub Check_Link_Anchor_Alt_Title_Check {
                     }
 
                     #
-                    # Record testcase result
+                    # Record testcase result, prevent double reporting if the
+                    # link appears multiple times in the list.
                     #
-                    Record_Result("WCAG_2.0-G197", $line_no, $column_no, "",
-                          $difference . String_Value("at line:column") .
-                          $previous_link->line_no . ":" .
-                          $previous_link->column_no);
+                    if ( ! defined($g197_reported{"$line_no:$column_no:$link_url"}) ) {
+                        Record_Result("WCAG_2.0-G197", $line_no, $column_no, "",
+                              $difference . String_Value("at line:column") .
+                              $previous_link->line_no . ":" .
+                              $previous_link->column_no);
+                        $g197_reported{"$line_no:$column_no:$link_url"} = 1;
+                    }
                 }
             }
             else {
@@ -3940,6 +4004,7 @@ sub TQA_Check_Links {
     foreach $section (@content_sections) {
         if ( defined($$link_sets{$section}) ) {
             $list_addr = $$link_sets{$section};
+            print "Check link anchor, alt, title for section $section\n" if $debug;
             Check_Link_Anchor_Alt_Title_Check($url, $profile, @$list_addr);
         }
     }
@@ -3971,7 +4036,7 @@ sub TQA_Check_Links {
 sub Check_Decorative_Image {
     my ($link, $decorative_images, $non_decorative_images) = @_;
         
-    my ($message, $href, $other_image, %attr);
+    my ($message, $href, $other_image, %attr, $text_alternative);
     my ($protocol, $domain, $file_path, $query, $new_url);
 
     #
@@ -3998,18 +4063,39 @@ sub Check_Decorative_Image {
     }
 
     #
-    # Check for null (empty) alt text.
+    # Get text alternative
+    #
+    %attr = $link->attr();
+    if ( $link->alt ne "" ) {
+        $text_alternative = $link->alt;
+    }
+    elsif ( defined($attr{"aria-label"}) ) {
+        $text_alternative = $attr{"aria-label"};
+    }
+    elsif ( defined($attr{"aria-labelledby"}) ) {
+        $text_alternative = $attr{"aria-labelledby"};
+    }
+    elsif ( defined($attr{"aria-describedby"}) ) {
+        $text_alternative = $attr{"aria-describedby"};
+    }
+    elsif ( defined($attr{"title"}) ) {
+        $text_alternative = $attr{"title"};
+    }
+
+    #
+    # Check for null (empty) text alternative.
     #
     print "Check decorative image alt text \"" . $link->alt . "\"\n" if $debug;
-    if ( $link->alt ne "" ) {
+    if ( $text_alternative ne "" ) {
         #
-        # Non-null alt text, it may be 1 or more spaces but it is not null
+        # Non-null text alternative, it may be 1 or more spaces but it is not null
         # e.g. "  " versus "".
         #
         Record_Result("WCAG_2.0-F39", $link->line_no, $link->column_no,
                       $link->source_line, 
-                      String_Value("Non null alt text") . " \"" .
-                      $link->alt . "\" " . String_Value("in decorative image"));
+                      String_Value("Non null alt text") .
+                      " \"$text_alternative\"" .
+                      String_Value("in decorative image"));
     }
 
     #
@@ -4055,6 +4141,21 @@ sub Check_Decorative_Image {
                       $link->source_line,
                       String_Value("Non null") . " 'aria-describedby=\"" .
                       $attr{"aria-describedby"} . "\"' " .
+                      String_Value("in decorative image"));
+    }
+
+    #
+    # Check for null (empty) title text.
+    #
+    print "Check decorative image title\n" if $debug;
+    if ( defined($attr{"title"}) && ($attr{"title"} ne "") ) {
+        #
+        # Non-null title text
+        #
+        Record_Result("WCAG_2.0-F39", $link->line_no, $link->column_no,
+                      $link->source_line,
+                      String_Value("Non null") . " 'title=\"" .
+                      $attr{"title"} . "\"' " .
                       String_Value("in decorative image"));
     }
 
@@ -4210,42 +4311,6 @@ sub Check_Decorative_Image {
             Record_Result("WCAG_2.0-F38", $link->line_no, $link->column_no,
                           $link->source_line, $message);
         }
-
-        #
-        # Check for a title, a decorative image should not have
-        # a title.
-        #
-        if ( defined($link->title) && ($link->title ne "") ) {
-            print "Decorative image with non null title " .
-                  $link->title . "\n" if $debug;
-            $message = String_Value("Non null title text") . " \"" .
-                       $link->title . "\" " .
-                       String_Value("in decorative image");
-
-            #
-            # Add URL if image was in the decorative image list.
-            #
-            if ( $other_image->referer_url eq "LIST" ) {
-                $message .= String_Value("Image URL in decorative list");
-            }
-            else {
-                #
-                # URL was not provided in a list, it must have been
-                # 'learned'. Provide URL when image was first found.
-                #
-                $message .= String_Value("Image first found in URL") .
-                            $other_image->referer_url;
-            }
-
-            #
-            # Record result
-            #
-            Record_Result("WCAG_2.0-H67", $link->line_no, $link->column_no,
-                          $link->source_line, $message);
-        }
-        else {
-            print "Image has no title attribute\n" if $debug;
-        }
     }
 }
 
@@ -4267,7 +4332,7 @@ sub Check_Decorative_Image {
 sub Check_Non_Decorative_Image {
     my ($link, $decorative_images, $non_decorative_images) = @_;
 
-    my ($message, $href, $other_image, %attr);
+    my ($message, $href, $other_image, %attr, $text_alternative);
     my ($protocol, $domain, $file_path, $query, $new_url);
 
     #
@@ -4300,12 +4365,33 @@ sub Check_Non_Decorative_Image {
         # Decorative image instance found in as non-decorative
         #
         print "Decorative $href image found as non-decorative\n" if $debug;
+        
+        #
+        # Get text alternative
+        #
+        %attr = $link->attr();
+        if ( ! ($link->alt =~ /^\s*$/) ) {
+            $text_alternative = $link->alt;
+        }
+        elsif ( defined($attr{"aria-label"}) ) {
+            $text_alternative = $attr{"aria-label"};
+        }
+        elsif ( defined($attr{"aria-labelledby"}) ) {
+            $text_alternative = $attr{"aria-labelledby"};
+        }
+        elsif ( defined($attr{"aria-describedby"}) ) {
+            $text_alternative = $attr{"aria-describedby"};
+        }
+        elsif ( defined($attr{"title"}) ) {
+            $text_alternative = $attr{"title"};
+        }
 
         #
         # Create error message
         #
-        $message = String_Value("Non null alt text") . " \"" . 
-                       $link->alt . "\" " . String_Value("in decorative image");
+        $message = String_Value("Non null text alternative") .
+                                " \"$text_alternative\" " .
+                                String_Value("in decorative image");
 
         #
         # Add URL if image was in the decorative image list.
@@ -4384,7 +4470,7 @@ sub TQA_Check_Images {
 
     my ($result_object, @local_tqa_results_list, $link);
     my ($is_decorative, $is_image, $href, $other_image);
-    my ($message, $resp, %attr);
+    my ($message, $resp, %attr, $tcid);
 
     #
     # Do we have a valid profile ?
@@ -4472,20 +4558,37 @@ sub TQA_Check_Images {
                 ($link->mime_type =~ /^image/i) ) {
                 #
                 # If the image has no alt, aria-label, aria-labelledby,
-                # or aria-describedby attribue it is
+                # aria-describedby or title attribue it is
                 # decorative, otherwise it is non decorative
                 #
                 %attr = $link->attr();
-                if ( ($link->alt =~ /^\s*$/) &&
-                     (! defined($attr{"aria-label"})) &&
-                     (! defined($attr{"aria-labelledby"})) &&
-                     (! defined($attr{"aria-describedby"})) ) {
-                    $is_decorative = 1;
-                    print "Decorative image\n" if $debug;
+                if ( ! ($link->alt =~ /^\s*$/) ) {
+                    $is_decorative = 0;
+                    print "Non-Decorative image with alt text\n" if $debug;
+                }
+                elsif ( defined($attr{"aria-label"}) &&
+                        ($attr{"aria-label"} ne "") ) {
+                    $is_decorative = 0;
+                    print "Non-Decorative image with aria-label\n" if $debug;
+                }
+                elsif ( defined($attr{"aria-labelledby"}) &&
+                        ($attr{"aria-labelledby"} ne "") ) {
+                    $is_decorative = 0;
+                    print "Non-Decorative image with aria-labelledby\n" if $debug;
+                }
+                elsif ( defined($attr{"aria-describedby"}) &&
+                        ($attr{"aria-describedby"} ne "") ) {
+                    $is_decorative = 0;
+                    print "Non-Decorative image with aria-describedby\n" if $debug;
+                }
+                elsif ( defined($attr{"title"}) &&
+                        ($attr{"title"} ne "") ) {
+                    $is_decorative = 0;
+                    print "Non-Decorative image with title\n" if $debug;
                 }
                 else {
-                    $is_decorative = 0;
-                    print "Non-Decorative image\n" if $debug;
+                    $is_decorative = 1;
+                    print "Decorative image\n" if $debug;
                 }
                 $is_image = 1;
             }
@@ -4516,6 +4619,18 @@ sub TQA_Check_Images {
     # Add our results to previous results
     #
     foreach $result_object (@local_tqa_results_list) {
+        #
+        # Add help URL to result
+        #
+        $tcid = $result_object->testcase();
+        if ( defined(TQA_Testcase_URL($tcid)) ) {
+            $result_object->help_url(TQA_Testcase_URL($tcid));
+        }
+
+        #
+        # Add result object to list provided in the
+        # function call.
+        #
         push(@$tqa_results_list, $result_object);
     }
 }
@@ -5081,7 +5196,7 @@ sub Import_Packages {
                           "pdf_check", "html_check", "link_object",
                           "metadata", "metadata_result_object",
                           "content_sections", "xml_check",
-                          "csv_check");
+                          "csv_check", "epub_check");
 
     #
     # Import packages, we don't use a 'use' statement as these packages

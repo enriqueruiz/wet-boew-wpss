@@ -843,9 +843,9 @@ return 1;
 #
 # Name:   open_data_check.pm
 #
-# $Revision: 7173 $
+# $Revision: 7604 $
 # $URL: svn://10.36.21.45/trunk/Web_Checks/Open_Data/Tools/open_data_check.pm $
-# $Date: 2015-06-05 10:51:04 -0400 (Fri, 05 Jun 2015) $
+# $Date: 2016-06-22 10:46:52 -0400 (Wed, 22 Jun 2016) $
 #
 # Description:
 #
@@ -863,6 +863,8 @@ return 1;
 #     Open_Data_Check_Zip_Content
 #     Open_Data_Check_Read_JSON_Description
 #     Open_Data_Check_Dataset_Files
+#     Open_Data_Check_Get_Headings_List
+#     Open_Data_Check_Get_Row_Column_Counts
 #
 # Terms and Conditions of Use
 #
@@ -901,7 +903,6 @@ use Encode;
 use File::Basename;
 use Archive::Zip qw(:ERROR_CODES);
 use JSON;
-use File::Temp qw/ tempfile tempdir /;
 
 
 #***********************************************************************
@@ -924,6 +925,8 @@ BEGIN {
                   Open_Data_Check_Zip_Content
                   Open_Data_Check_Read_JSON_Description
                   Open_Data_Check_Dataset_Files
+                  Open_Data_Check_Get_Headings_List
+                  Open_Data_Check_Get_Row_Column_Counts
                   );
     $VERSION = "1.0";
 }
@@ -941,6 +944,7 @@ my (@paths, $this_path, $program_dir, $program_name, $paths);
 my ($current_open_data_profile, $current_url, $results_list_addr);
 my ($current_open_data_profile_name, %testcase_data);
 my (@supporting_doc_url, %expected_row_count, %first_url_count);
+my ($last_headings_list, %expected_column_count);
 
 my ($max_error_message_string) = 2048;
 
@@ -961,6 +965,7 @@ my %string_table_en = (
     "Error in reading ZIP, status =",  "Error in reading ZIP, status =",
     "Fails validation",                "Fails validation",
     "for",                             "for",
+    "Inconsistent column count, found", "Inconsistent column count, found ",
     "Inconsistent format and mime-type", "Inconsistent format and mime-type",
     "Inconsistent row count, found",   "Inconsistent row count, found ",
     "Invalid dataset description field type", "Invalid dataset description field type",
@@ -983,6 +988,7 @@ my %string_table_fr = (
     "Error in reading ZIP, status =",  "Erreur de lecture fichier ZIP, status =",
     "Fails validation",                "Échoue la validation",
     "for",                             "pour",
+    "Inconsistent column count, found", "Nombre de colonnes incompatibles, trouvé ",
     "Inconsistent format and mime-type", "Les valeurs de format et de type MIME sont incompatibles",
     "Inconsistent row count, found",   "Nombre de lignes incompatibles, trouvé ",
     "Invalid dataset description field type", "Invalide type de champ de description de données",
@@ -1157,7 +1163,7 @@ sub String_Value {
 sub Set_Open_Data_Check_Testcase_Data {
     my ($testcase, $data) = @_;
     
-    my ($list_addr, $type, $value);
+    my ($type, $value);
     
     #
     # Is this data for supporting files ?
@@ -1324,7 +1330,6 @@ sub Record_Result {
 # Name: Check_Content_Encoding
 #
 # Parameters: filename - file containing content
-#             tcid - testcase identifier
 #
 # Description:
 #
@@ -1332,7 +1337,7 @@ sub Record_Result {
 #
 #***********************************************************************
 sub Check_Content_Encoding {
-    my ($filename, $tcid) = @_;
+    my ($filename) = @_;
 
     my ($output, $content);
 
@@ -1357,7 +1362,7 @@ sub Check_Content_Encoding {
             # Not UTF 8 content
             #
             $output =  eval { decode('utf8', $content, Encode::FB_WARN);};
-            Record_Result($tcid, 0, -1, "$output",
+            Record_Result("OD_2", 0, -1, "$output",
                           String_Value("Character encoding is not UTF-8"));
         }
     }
@@ -1372,7 +1377,6 @@ sub Check_Content_Encoding {
 #
 # Parameters: resp - HTTP response object
 #             filename - file containing content
-#             tcid - testcase identifier
 #
 # Description:
 #
@@ -1381,7 +1385,7 @@ sub Check_Content_Encoding {
 #
 #***********************************************************************
 sub Check_Encoding {
-    my ($resp, $filename, $tcid) = @_;
+    my ($resp, $filename) = @_;
 
     #
     # Does the HTTP response object indicate the content is UTF-8
@@ -1391,7 +1395,7 @@ sub Check_Encoding {
         print "UTF-8 content\n" if $debug;
     }
     else {
-        Check_Content_Encoding($filename, $tcid);
+        Check_Content_Encoding($filename);
     }
 }
 
@@ -1440,16 +1444,16 @@ sub Check_Dictionary_URL {
     }
 
     #
+    # Check for UTF-8 encoding
+    #
+    Check_Encoding($resp, $filename);
+
+    #
     # Is this a plain text file ?
     #
     if ( ($mime_type =~ /text\/plain/) ||
          ($format =~ /^txt$/i) ||
          ($url =~ /\.txt$/i) ) {
-        #
-        # Check for UTF-8 encoding
-        #
-        Check_Encoding($resp, $filename, "OD_2");
-
         #
         # Check plain text data dictionary
         #
@@ -1467,11 +1471,6 @@ sub Check_Dictionary_URL {
             ($mime_type =~ /text\/xml/) ||
             ($format =~ /^xml$/i) ||
             ($url =~ /\.xml$/i) ) {
-        #
-        # Check for UTF-8 encoding
-        #
-        Check_Encoding($resp, $filename, "OD_2");
-
         #
         # Check XML data dictionary
         #
@@ -1521,7 +1520,7 @@ sub Check_Resource_URL {
     #
     # Check for UTF-8 encoding
     #
-    Check_Encoding($resp, $content, "OD_2");
+    Check_Encoding($resp, $content);
 }
 
 #***********************************************************************
@@ -1545,7 +1544,7 @@ sub Check_Data_File_URL {
     my ($url, $format, $resp, $filename, $dictionary) = @_;
 
     my ($result_object, @other_results, $header, $mime_type, $base);
-    my ($row_count, $eng_url);
+    my ($row_count, $column_count, $eng_url);
 
     #
     # Data files are expected to be either XML or CSV
@@ -1580,7 +1579,7 @@ sub Check_Data_File_URL {
         # Check for UTF-8 encoding
         #
         print "CSV data file\n" if $debug;
-        Check_Encoding($resp, $filename, "OD_2");
+        Check_Encoding($resp, $filename);
 
         #
         # Check CSV data file
@@ -1591,10 +1590,16 @@ sub Check_Data_File_URL {
                                                   $dictionary);
 
         #
-        # Record the number of rows found
+        # Record the number of rows and columns found
         #
         $row_count = Open_Data_CSV_Check_Get_Row_Count($url);
+        $column_count = Open_Data_CSV_Check_Get_Column_Count($url);
         
+        #
+        # Record the list of headings found
+        #
+        $last_headings_list = Open_Data_CSV_Check_Get_Headings_List($url);
+
         #
         # Convert URL to an English URL (if there is a language specfied
         # in the directory path or file name).
@@ -1628,6 +1633,29 @@ sub Check_Data_File_URL {
                               String_Value("as found in") .
                               $first_url_count{$eng_url});
             }
+
+            #
+            # Do we have a column count for the English URL ?
+            # If we don't there may be no English URL, if this
+            # is the case use this URL as the pseudo English URL
+            #
+            if ( ! defined($expected_column_count{$eng_url}) ) {
+                $expected_column_count{$eng_url} = $column_count;
+            }
+
+            #
+            # Compare this URL's column count to the English
+            # (or pseudo English) URL's count count
+            #
+            if ( $row_count != $expected_row_count{$eng_url} ) {
+                Record_Result("OD_CSV_1", -1, -1, "",
+                              String_Value("Inconsistent column count, found") .
+                              $column_count .
+                              String_Value("expecting") .
+                              $expected_column_count{$eng_url} .
+                              String_Value("as found in") .
+                              $first_url_count{$eng_url});
+            }
         }
     }
     #
@@ -1639,7 +1667,7 @@ sub Check_Data_File_URL {
         #
         # Check for UTF-8 encoding
         #
-        Check_Encoding($resp, $filename, "OD_2");
+        Check_Encoding($resp, $filename);
 
         #
         # Check JSON data file
@@ -1661,7 +1689,7 @@ sub Check_Data_File_URL {
         #
         # Check for UTF-8 encoding
         #
-        Check_Encoding($resp, $filename, "OD_2");
+        Check_Encoding($resp, $filename);
 
         #
         # Check XML data file
@@ -1674,7 +1702,7 @@ sub Check_Data_File_URL {
     }
     else {
         #
-        # Unexpected mime-type for a dictionary.  If the mime type
+        # Unexpected mime-type for a data file.  If the mime type
         # is for a ZIP file, use the type from the file suffix to
         # report the error.
         #
@@ -1687,7 +1715,7 @@ sub Check_Data_File_URL {
     }
 
     #
-    # Add results from data dictionary check into the complete results list.
+    # Add results from data file check into the complete results list.
     #
     foreach $result_object (@other_results) {
         push(@$results_list_addr, $result_object);
@@ -1876,7 +1904,7 @@ sub Check_API_URL {
             #
             # Check for UTF-8 encoding
             #
-            Check_Encoding($resp, $filename, "OD_API_2");
+            Check_Encoding($resp, $filename);
 
             #
             # Check JSON API
@@ -1895,7 +1923,7 @@ sub Check_API_URL {
             #
             # Check for UTF-8 encoding
             #
-            Check_Encoding($resp, $filename, "OD_API_2");
+            Check_Encoding($resp, $filename);
 
             #
             # Check XML API
@@ -1909,7 +1937,7 @@ sub Check_API_URL {
             #
             # Unexpected mime-type for API
             #
-            Record_Result("OD_API_3", -1, -1, "",
+            Record_Result("OD_3", -1, -1, "",
                           String_Value("Invalid mime-type for API")
                            . " \"" . $mime_type . "\"");
         }
@@ -2024,7 +2052,7 @@ sub Open_Data_Check {
     my ($url, $format, $profile, $data_file_type, $resp, $filename,
         $dictionary) = @_;
 
-    my (@tqa_results_list, $result_object, @other_results);
+    my (@tqa_results_list, $result_object, @other_results, $tcid);
 
     #
     # Do we have a valid profile ?
@@ -2040,6 +2068,11 @@ sub Open_Data_Check {
     #
     Initialize_Test_Results($profile, \@tqa_results_list);
     $current_url = $url;
+    
+    #
+    # Clear last headings list variable
+    #
+    $last_headings_list = "";
 
     #
     # Are any of the testcases defined in this module
@@ -2109,12 +2142,20 @@ sub Open_Data_Check {
     Check_Format_and_Mime_Type_File_Suffix($url, $format, $resp);
 
     #
-    # Print testcase information
+    # Add testcase help URL to results
     #
-    if ( $debug ) {
-        print "Open_Data_Check results\n";
-        foreach $result_object (@tqa_results_list) {
-            print "Testcase: " . $result_object->testcase;
+    print "Open_Data_Check results\n" if $debug;
+    foreach $result_object (@tqa_results_list) {
+        $tcid = $result_object->testcase();
+        if ( defined(Open_Data_Check_Testcase_URL($tcid)) ) {
+            $result_object->help_url(Open_Data_Check_Testcase_URL($tcid));
+        }
+
+        #
+        # Print testcase information
+        #
+        if ( $debug ) {
+            print "Testcase: $tcid\n";
             print "  URL   = " . $result_object->url . "\n";
             print "  message  = " . $result_object->message . "\n";
             print "  source line  = " . $result_object->source_line . "\n";
@@ -2148,8 +2189,8 @@ sub Open_Data_Check {
 sub Open_Data_Check_Zip_Content {
     my ($url, $profile, $data_file_type, $resp) = @_;
 
-    my (@tqa_results_list, $zip, $zip_file_name, $zip_status);
-    my (@members, $member_name, %file_types, $base, $suffix);
+    my (@tqa_results_list, $zip, $zip_file_name, $zip_status, $result_object);
+    my (@members, $member_name, %file_types, $base, $suffix, $tcid);
 
     #
     # Do we have a valid profile ?
@@ -2192,7 +2233,7 @@ sub Open_Data_Check_Zip_Content {
     if ( $zip_status != AZ_OK ) {
         print "Error reading archive, status = $zip_status\n" if $debug;
         undef($zip);
-        Record_Result("OD_ZIP_1", -1, -1, "",
+        Record_Result("OD_3", -1, -1, "",
                       String_Value("Error in reading ZIP, status =")
                        . " $zip_status");
     }
@@ -2221,6 +2262,27 @@ sub Open_Data_Check_Zip_Content {
             Record_Result("TP_PW_OD_ZIP_1", -1, -1, "",
                           String_Value("Multiple file types in ZIP") . 
                           " \"" . join(", ", keys(%file_types)) . "\"");
+        }
+    }
+
+    #
+    # Add testcase help URL to results
+    #
+    print "Open_Data_Check_Zip_Content results\n" if $debug;
+    foreach $result_object (@tqa_results_list) {
+        $tcid = $result_object->testcase();
+        if ( defined(Open_Data_Check_Testcase_URL($tcid)) ) {
+            $result_object->help_url(Open_Data_Check_Testcase_URL($tcid));
+        }
+
+        #
+        # Print testcase information
+        #
+        if ( $debug ) {
+            print "Testcase: $tcid\n";
+            print "  URL   = " . $result_object->url . "\n";
+            print "  message  = " . $result_object->message . "\n";
+            print "  source line  = " . $result_object->source_line . "\n";
         }
     }
 
@@ -2268,7 +2330,7 @@ sub Check_Open_Data_Description_URL {
         #
         # Check for UTF-8 encoding
         #
-        Check_Encoding($resp, $filename, "OD_2");
+        Check_Encoding($resp, $filename);
     }
 }
 
@@ -2291,7 +2353,7 @@ sub Read_JSON_Open_Data_Description {
     my ($resp, $filename) = @_;
 
     my (%dataset_urls) = ();
-    my ($ref, $result, $resources, $value, $url, $type);
+    my ($ref, $result, $resources, $value, $url, $type, $name);
     my ($eval_output, $i, $ref_type, $format, $content, $line);
     my ($have_error) = 0;
 
@@ -2399,24 +2461,41 @@ sub Read_JSON_Open_Data_Description {
            if ( ref $value eq "HASH" ) {
                $type = $$value{"resource_type"};
                $format = $$value{"format"};
+               $name = $$value{"name"};
                $url = $$value{"url"};
                print "Dataset URL # $i, type = $type, format = $format, url = $url\n" if $debug;
                $i++;
                        
                #
-               # Save dataset URL
+               # Save dataset URL based on type.
                #
                if ( $type eq "api" ) {
                    $dataset_urls{"API"} .= "$format\t$url\n";
                }
-               elsif ( $type eq "doc" ) {
-                   $dataset_urls{"DICTIONARY"} .= "$format\t$url\n";
+               elsif ( ($type eq "doc") || ($type eq "guide") ) {
+                   #
+                   # Accept TXT and XML formatted documents. Other formats are
+                   # likely to be supporting documents, not data dictionaries.
+                   #
+                   if ( ($format eq "TXT") || ($format eq "XML") ) {
+                       $dataset_urls{"DICTIONARY"} .= "$format\t$url\n";
+                   }
+                   #
+                   # Check for name Data Dictionary or Dictionnaire de données
+                   #
+                   elsif ( ($name eq "Data Dictionary") ||
+                           ($name eq "Dictionnaire de données") ) {
+                       $dataset_urls{"DICTIONARY"} .= "$format\t$url\n";
+                   }
+                   #
+                   # Is the format HTML, then assume it is a supporting document
+                   #
+                   elsif ( $format eq "HTML" ) {
+                       $dataset_urls{"RESOURCE"} .= "$format\t$url\n";
+                   }
                }
-               elsif ( $type eq "file" ) {
+               elsif ( ($type eq "file") || ($type eq "dataset") ) {
                    $dataset_urls{"DATA"} .= "$format\t$url\n";
-               }
-               elsif ( $type eq "doc" ) {
-                   $dataset_urls{"DICTIONARY"} .= "$format\t$url\n";
                }
            }
         }
@@ -2501,7 +2580,7 @@ sub Open_Data_Check_Read_JSON_Description {
         }
         else {
             #
-            # Unexpected mime-type for API
+            # Unexpected mime-type for description URL
             #
             print "Invalid mime-type for description URL \"$mime_type\"\n" if $debug;
             Record_Result("OD_3", -1, -1, "",
@@ -2595,6 +2674,43 @@ sub Open_Data_Check_Dataset_Files {
     # Return results
     #
     return(@tqa_results_list);
+}
+
+#***********************************************************************
+#
+# Name: Open_Data_Check_Get_Headings_List
+#
+# Parameters: this_url - a URL
+#
+# Description:
+#
+#   This function returns the headings list found in the last CSV file
+# analysed.
+#
+#***********************************************************************
+sub Open_Data_Check_Get_Headings_List {
+    my ($this_url) = @_;
+
+    return(Open_Data_CSV_Check_Get_Headings_List($this_url));
+}
+
+#***********************************************************************
+#
+# Name: Open_Data_Check_Get_Row_Column_Counts
+#
+# Parameters: this_url - a URL
+#
+# Description:
+#
+#   This function returns the number of rows and columns
+# found in the last CSV file analysed.
+#
+#***********************************************************************
+sub Open_Data_Check_Get_Row_Column_Counts {
+    my ($this_url) = @_;
+
+    return(Open_Data_CSV_Check_Get_Row_Count($this_url),
+           Open_Data_CSV_Check_Get_Column_Count($this_url));
 }
 
 #***********************************************************************
